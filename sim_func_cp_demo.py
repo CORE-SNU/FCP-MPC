@@ -353,6 +353,7 @@ def run_one_episode_visual_from_file(
     n_paths: int = 1200,
     max_steps: Optional[int] = None,
     max_tracking_error: float = 0.1,
+    i_view: int = 0,
     CP: bool = False,
 ):
     if dataset not in EVAL_TASK_CONFIGS:
@@ -449,20 +450,21 @@ def run_one_episode_visual_from_file(
     current_cov_val = 0.0
     per_step_ok: List[bool] = []
 
+
     fig, axs = plt.subplots(1, 2, figsize=(14, 7), constrained_layout=True)
 
     im_heat = axs[0].imshow(
         np.zeros((grid_H, grid_W), dtype=np.float32),
         extent=extent,
         origin="lower",
-        cmap="viridis_r",
+        cmap="viridis",
         vmin=0,
         vmax=10,
     )
     plt.colorbar(im_heat, ax=axs[0], fraction=0.046, pad=0.04)
-    axs[0].set_title("CP lower-bound field (grid viz only)")
+    axs[0].set_title("CP lower-bound field", fontsize=18)
 
-    axs[1].set_title(f"Unsafe region: True vs CP (alpha={alpha})")
+    axs[1].set_title(f"Unsafe region: True vs CP (horizon={i_view+1})", fontsize=18)
     im_true = axs[1].imshow(np.zeros((grid_H, grid_W)), extent=extent, origin="lower", cmap="Blues", vmin=0, vmax=1, alpha=0.4)
     im_cp = axs[1].imshow(np.zeros((grid_H, grid_W)), extent=extent, origin="lower", cmap="Reds", vmin=0, vmax=1, alpha=0.5)
 
@@ -474,7 +476,7 @@ def run_one_episode_visual_from_file(
         ax.plot(goal[0], goal[1], "gx", ms=12, mew=2)
 
         dot, = ax.plot([], [], "bo", ms=7, zorder=5)
-        line, = ax.plot([], [], "b-", lw=1, alpha=0.5)
+        line, = ax.plot([], [], "r-", lw=5, alpha=0.9)
         plan_p, = ax.plot([], [], "c--", lw=1.5, zorder=4)
         peds = ax.scatter([], [], s=25, edgecolors="black", zorder=6)
         pred_sc = ax.scatter([], [], s=40, marker="x", zorder=7)
@@ -487,9 +489,12 @@ def run_one_episode_visual_from_file(
 
     status_text = fig.text(0.5, 0.02, "", ha="center", fontsize=10, fontweight="bold")
 
+    steps = max_n_steps
+
+
     def update(k: int):
         nonlocal robot_xy, robot_th, collision_count, infeasible_count, max_tracking_error
-        nonlocal eval_steps, ok_steps, current_cov_val, per_step_ok
+        nonlocal eval_steps, ok_steps, current_cov_val, per_step_ok, steps, i_view
         ts_key = scenario_begin + k
         if ts_key not in pred_all or ts_key not in hist_all or ts_key not in fut_all:
             status_text.set_text(
@@ -503,7 +508,6 @@ def run_one_episode_visual_from_file(
                 f"p90={stats['p90']:.3f} | p99={stats['p99']:.3f} | max={stats['max']:.3f}"
             )
             status_text.set_color("red")
-            anim.event_source.stop()
             return []
 
         dist_to_goal = float(np.linalg.norm(robot_xy - goal))
@@ -519,7 +523,6 @@ def run_one_episode_visual_from_file(
                 f"p90={stats['p90']:.3f} | p99={stats['p99']:.3f} | max={stats['max']:.3f}"
             )
             status_text.set_color("green")
-            anim.event_source.stop()
             return []
 
         p_dict = pred_all[ts_key]   # predictions at t: give (t+1..t+H)
@@ -530,7 +533,6 @@ def run_one_episode_visual_from_file(
         p_now = get_current_obs_from_history(h_dict)
 
         # Choose which future step to visualize/compare
-        i_view = 0 # 0 means t+1 in reference convention
 
         p_future = get_future_obs_from_future_dict(f_dict, i_view)
 
@@ -647,9 +649,19 @@ def run_one_episode_visual_from_file(
         # Update robot
         robot_xy, robot_th = unicycle_step(robot_xy, robot_th, v, w, DT)
         robot_traj.append(robot_xy.copy())
+        if k == 49:
+            video_filename = f"{dataset}_iview_{i_view}_CP_{CP}.png"
+            save_path = os.path.join(os.path.dirname(__file__), video_filename)
+            plt.savefig(save_path, dpi=150)
+
 
 
         return []
+
+    #anim = FuncAnimation(fig, update, frames=97, interval=100, blit=False, repeat=False)
+    #video_filename = f"{dataset}_iview_{i_view}_CP_{CP}.mp4"
+    #save_path = os.path.join(os.path.dirname(__file__), video_filename)
+    #anim.save(save_path, writer='ffmpeg', fps=10, dpi=150)
 
     anim = FuncAnimation(fig, update, frames=max_n_steps, interval=100, blit=False, repeat=False)
     plt.show()
@@ -660,7 +672,7 @@ if __name__ == "__main__":
     run_one_episode_visual_from_file(
         dataset=DATASET,
         scenario_idx=0,
-        time_horizon=17,
+        time_horizon=12,
         grid_H=128,
         grid_W=128,
         alpha=0.1,
@@ -673,5 +685,6 @@ if __name__ == "__main__":
         n_skip=2,
         n_paths=1200,
         max_tracking_error=0.05,
+        i_view=6,
         CP = True,
     )
