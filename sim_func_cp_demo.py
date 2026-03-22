@@ -16,7 +16,6 @@ from sims.sim_utils import (
 )
 from cp.functional_cp import get_envelopes_value_and_function, CPStepParameters
 from controllers.func_cp_mpc import FunctionalCPMPC
-from controllers.func_cp_potential import FunctionalCPFieldController
 import time
 
 # ==============================================================================
@@ -490,11 +489,19 @@ def run_one_episode_visual_from_file(
     status_text = fig.text(0.5, 0.02, "", ha="center", fontsize=10, fontweight="bold")
 
     steps = max_n_steps
+    anim = None
 
+    def _stop_animation(final_text: str, color: str):
+        nonlocal anim
+        status_text.set_text(final_text)
+        status_text.set_color(color)
+        if anim is not None and anim.event_source is not None:
+            anim.event_source.stop()
+        fig.canvas.draw_idle()
 
     def update(k: int):
         nonlocal robot_xy, robot_th, collision_count, infeasible_count, max_tracking_error
-        nonlocal eval_steps, ok_steps, current_cov_val, per_step_ok, steps, i_view
+        nonlocal eval_steps, ok_steps, current_cov_val, per_step_ok, steps, i_view, anim
         ts_key = scenario_begin + k
         if ts_key not in pred_all or ts_key not in hist_all or ts_key not in fut_all:
             status_text.set_text(
@@ -507,7 +514,10 @@ def run_one_episode_visual_from_file(
                 f"mean={stats['mean']:.3f} ms | p50={stats['p50']:.3f} | "
                 f"p90={stats['p90']:.3f} | p99={stats['p99']:.3f} | max={stats['max']:.3f}"
             )
-            status_text.set_color("red")
+            _stop_animation(
+                f"Ended | timestep={k} | Cov={current_cov_val:.2%} | infeasible={infeasible_count} | collisions={collision_count} | colision_rate={collision_count / max(1, k-14):.2f} | infeas_rate={infeasible_count / max(1, k-14):.2f}",
+                "red",
+            )
             return []
 
         dist_to_goal = float(np.linalg.norm(robot_xy - goal))
@@ -522,7 +532,10 @@ def run_one_episode_visual_from_file(
                 f"mean={stats['mean']:.3f} ms | p50={stats['p50']:.3f} | "
                 f"p90={stats['p90']:.3f} | p99={stats['p99']:.3f} | max={stats['max']:.3f}"
             )
-            status_text.set_color("green")
+            _stop_animation(
+                f"GOAL reached | timestep={k} | Cov={current_cov_val:.2%} | dist={dist_to_goal:.2f} | infeasible={infeasible_count} | collisions={collision_count} | colision_rate={collision_count / max(1, k-14):.2f} | infeas_rate={infeasible_count / max(1, k-14):.2f}",
+                "green",
+            )
             return []
 
         p_dict = pred_all[ts_key]   # predictions at t: give (t+1..t+H)
