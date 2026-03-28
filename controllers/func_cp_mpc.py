@@ -259,6 +259,73 @@ class FunctionalCPMPC:
 
         return w_new
 
+    def _evaluate_soft_safety_terms(
+        self,
+        paths: np.ndarray,
+        predictions: Dict[Any, np.ndarray],
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        P, T1, _ = paths.shape
+        T = T1 - 1
+
+        tau = 0.2
+        softmin_acc = np.zeros(P, dtype=np.float32)
+        softmin = np.full(P, np.inf, dtype=np.float32)
+        safety_acc = np.zeros(P, dtype=np.float32)
+
+        if self.weights.w_safety <= 0.0 or not predictions:
+            return safety_acc, softmin
+
+        pred_arr = np.asarray(list(predictions.values()), dtype=np.float32).transpose(1, 0, 2)
+        T_use = min(T, pred_arr.shape[0])
+        prev_d_lower: Optional[np.ndarray] = None
+        sigma = 0.2
+
+        for t in range(T_use):
+            x_t = paths[:, t + 1, :]
+            diff = x_t[:, None, :] - pred_arr[t][None, :, :]
+            d_nom = np.min(np.linalg.norm(diff, axis=-1), axis=1)
+
+            if self.CP and (self.U_grid is not None):
+                tU = min(max(int(t), 0), int(self.U_grid.shape[0]) - 1)
+                i, j, inside = self._world_to_grid_ij_batch(x_t)
+                U_vec = np.zeros((x_t.shape[0],), dtype=np.float32)
+                if np.any(inside):
+                    U_vec[inside] = self.U_grid[tU, i[inside], j[inside]]
+                d_lower = np.maximum(d_nom - U_vec, 0.0)
+            else:
+                d_lower = d_nom.astype(np.float32, copy=False)
+
+            violation = (self.safe_rad - d_lower) / sigma
+            phi = np.log1p(np.exp(violation)).astype(np.float32, copy=False)
+
+            urgency_weight = max(0.0, 1.0 - t / max(1, T_use))
+            penalty = (self.weights.w_margin * phi).astype(np.float32, copy=False)
+
+            if prev_d_lower is not None:
+                delta = d_lower - prev_d_lower
+                gain = np.maximum(delta, 0.0)
+                gain = np.minimum(gain, 0.5)
+                penalty = penalty - (self._eta * gain).astype(np.float32, copy=False)
+
+            prev_d_lower = d_lower
+            safety_acc += urgency_weight * penalty
+
+            slack_t = d_lower - (self.safe_rad + self._target_slack)
+            w_t = np.exp(-t / 0.9).astype(np.float32)
+            softmin_acc += w_t * np.exp(-slack_t / tau).astype(np.float32, copy=False)
+
+        if T_use > 0:
+            safety_acc = safety_acc / max(1, T_use)
+            softmin = -tau * np.log(softmin_acc + 1e-12)
+
+        return safety_acc, softmin
+
+    def _apply_online_update(self, min_slack: float) -> float:
+        return self._update_w_safety_from_slack(
+            min_slack,
+            target_slack=self._target_slack,
+        )
+
 
     # ---------------------------------------------------------------------
     # Public MPC API
@@ -346,10 +413,7 @@ class FunctionalCPMPC:
         # 3) Score feasible candidates and pick the best
         t_score0 = time.perf_counter()
         best_idx, best_cost, best_min_slack = self.score_paths(safe_paths, safe_vels, goal, predictions)
-        self._update_w_safety_from_slack(
-            best_min_slack,
-            target_slack=self._target_slack,
-        )
+        self._apply_online_update(best_min_slack)
         self.last_best_vels = safe_vels[best_idx].copy()
         t_score1 = time.perf_counter()
 
@@ -657,66 +721,8 @@ class FunctionalCPMPC:
         # -----------------------------
         # Slack summary used for adaptation
         # -----------------------------
-        tau = 0.2
-        softmin_acc = np.zeros(P, dtype=np.float32)
-        softmin = np.full(P, np.inf, dtype=np.float32)
-
-        # -----------------------------
-        # Soft safety shaping
-        # -----------------------------
-        if self.weights.w_safety > 0.0 and predictions and len(predictions) > 0:
-            pred_arr = np.asarray(list(predictions.values()), dtype=np.float32).transpose(1, 0, 2)  # (T_pred, M, 2)
-            T_use = min(T, pred_arr.shape[0])
-
-            safety_acc = np.zeros(P, dtype=np.float32)
-            prev_d_lower: Optional[np.ndarray] = None
-
-            sigma = 0.2  # smoothness for softplus
-
-            for t in range(T_use):
-                x_t = paths[:, t + 1, :]  # (P,2)
-
-                # Nominal distance to nearest predicted agent at step t
-                diff = x_t[:, None, :] - pred_arr[t][None, :, :]          # (P, M, 2)
-                d_nom = np.min(np.linalg.norm(diff, axis=-1), axis=1)      # (P,)
-
-                # Conformalized lower bound distance
-                if self.CP and (self.U_grid is not None):
-                    tU = min(max(int(t), 0), int(self.U_grid.shape[0]) - 1)
-
-                    i, j, inside = self._world_to_grid_ij_batch(x_t)
-                    U_vec = np.zeros((x_t.shape[0],), dtype=np.float32)
-                    if np.any(inside):
-                        U_vec[inside] = self.U_grid[tU, i[inside], j[inside]]
-
-                    d_lower = np.maximum(d_nom - U_vec, 0.0)
-
-                else:
-                    d_lower = d_nom.astype(np.float32, copy=False)
-
-                # Smooth barrier against violating the safety radius
-                violation = (self.safe_rad - d_lower) / sigma  # (P,)
-                phi = np.log1p(np.exp(violation)).astype(np.float32, copy=False)  # softplus
-
-                urgency_weight = max(0.0, 1.0 - t / max(1, T_use))
-                penalty = (self.weights.w_margin * phi).astype(np.float32, copy=False)
-
-                if prev_d_lower is not None:
-                    delta = d_lower - prev_d_lower
-                    gain = np.maximum(delta, 0.0)
-                    gain = np.minimum(gain, 0.5)
-                    penalty = penalty - (self._eta * gain).astype(np.float32, copy=False)
-
-                prev_d_lower = d_lower
-                safety_acc += urgency_weight * penalty
-
-                # Slack summary accumulation
-                slack_t = d_lower - (self.safe_rad + self._target_slack)   # (P,)
-                w_t = np.exp(-t / 0.9).astype(np.float32)                  # scalar
-                softmin_acc += w_t * np.exp(-slack_t / tau).astype(np.float32, copy=False)
-
-            total_cost = total_cost + self.weights.w_safety * (safety_acc / max(1, T_use))
-            softmin = -tau * np.log(softmin_acc + 1e-12)
+        safety_acc, softmin = self._evaluate_soft_safety_terms(paths, predictions)
+        total_cost = total_cost + self.weights.w_safety * safety_acc
 
         best_idx = int(np.argmin(total_cost))
         best_cost = float(total_cost[best_idx])
