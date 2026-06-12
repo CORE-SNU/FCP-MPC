@@ -22,7 +22,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 datasets=("zara1" "zara2" "univ" "eth")
-controllers=("ecp-mpc" "acp-mpc" "cc" "fcp-mpc")
+controllers=("cc" "ecp-mpc" "acp-mpc" "fcp-hard-adaptive" "fcp-hard-nonadaptive" "fcp-soft-adaptive" "fcp-soft-nonadaptive")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 for dataset in "${datasets[@]}"; do

@@ -200,10 +200,13 @@ class FuncMPCWeights:
         Intermediate goal tracking weight (sum along the horizon).
     w_control : float
         Control effort weight.
+    w_safety : float
+        Weight for the soft safety penalty (used only when safety_mode="soft").
     """
     w_terminal: float = 10.0
     w_intermediate: float = 1.0
     w_control: float = 0.001
+    w_safety: float = 50.0
 
 
 # =============================================================================
@@ -255,28 +258,20 @@ class FunctionalCPMPC:
         seed: int = 0,
         weights: Optional[FuncMPCWeights] = None,
         CP: bool = True,
+        adaptive: bool = True,
+        safety_mode: str = "hard",
     ):
         """
         Parameters
         ----------
         cp_params : list
             Offline-cached parameters for the CP envelope, one per horizon index i.
-            Each element is expected to have a field `t_idx` used as a dictionary key.
-        box, world_center, grid_H, grid_W
-            Workspace grid configuration used for fast basis lookup:
-              - world -> grid index -> basis vector phi(x).
-        n_steps, dt, n_skip
-            MPC horizon length, timestep, and control blocking factor.
-        robot_rad, obstacle_rad
-            Used to define the safety radius r_safe = robot_rad + obstacle_rad.
-        min_linear_x, max_linear_x, min_angular_z, max_angular_z
-            Sampling bounds for candidate controls.
-        n_paths
-            Number of Monte Carlo candidate paths per MPC call.
-        seed
-            RNG seed for reproducibility.
-        weights
-            MPC objective weights. If None, defaults are used.
+        adaptive : bool
+            If True, use CPOnlineAdapter to update coeff quantiles online (ACP).
+            If False, use fixed offline coefficients.
+        safety_mode : str
+            "hard" — filter out candidate paths that violate the CP safety constraint.
+            "soft" — skip dynamic-obstacle filtering; instead add a soft penalty in scoring.
         """
         # Workspace/grid configuration
         self.box = float(box)
@@ -311,9 +306,14 @@ class FunctionalCPMPC:
         self.last_best_vels: Optional[np.ndarray] = None  # warm-start storage
 
         self.CP = CP
+        self.adaptive = bool(adaptive)
+        self.safety_mode = str(safety_mode).lower()
+        if self.safety_mode not in ("hard", "soft"):
+            raise ValueError(f"safety_mode must be 'hard' or 'soft', got '{safety_mode}'")
+
         self._frame_idx = 0
         self._cp_adapter: Optional[CPOnlineAdapter] = None
-        if self.CP:
+        if self.CP and self.adaptive:
             self._cp_adapter = CPOnlineAdapter(
                 self.get_cp_params(),
                 world_center=self.world_center,
@@ -526,7 +526,7 @@ class FunctionalCPMPC:
             obs_dict = observations
 
         self._frame_idx += 1
-        if self.CP and self._cp_adapter is not None:
+        if self.CP and self.adaptive and self._cp_adapter is not None:
             updated = self._cp_adapter.step(self._frame_idx, obs_dict, predictions)
             if updated:
                 self.set_cp_params(self._cp_adapter.snapshot())
@@ -540,7 +540,9 @@ class FunctionalCPMPC:
         paths, vels = self.generate_paths_random(pos_x, pos_y, orientation_z)
         t_roll1 = time.perf_counter()
 
-        # 2) Hard feasibility filtering (static obstacles + CP-safe distance checks)
+        # 2) Feasibility filtering
+        #    hard mode: strict dynamic-obstacle filter (paths violating CP safety removed)
+        #    soft mode: only static-obstacle filter; dynamic safety handled as cost penalty
         t_filt0 = time.perf_counter()
         safe_paths, safe_vels, cp_violation = self.filter_unsafe_paths(paths, vels, boxes, predictions)
         t_filt1 = time.perf_counter()
@@ -566,7 +568,7 @@ class FunctionalCPMPC:
 
         # 3) Score feasible candidates and pick the best
         t_score0 = time.perf_counter()
-        best_idx, best_cost = self.score_paths(safe_paths, safe_vels, goal)
+        best_idx, best_cost = self.score_paths(safe_paths, safe_vels, goal, predictions)
         self.last_best_vels = safe_vels[best_idx].copy()
         t_score1 = time.perf_counter()
 
@@ -687,8 +689,15 @@ class FunctionalCPMPC:
                 mask_static_unsafe |= coll
 
         # (B) Dynamic obstacles: CP-conformalized distance lower bound checks
+        # In soft mode, skip hard filtering — safety is handled as a cost penalty in score_paths.
         mask_dynamic_unsafe = np.zeros(P, dtype=bool)
-        cp_violation = 0.0  # (reserved: you can accumulate margin violations here if desired)
+        cp_violation = 0.0
+
+        if self.safety_mode == "soft":
+            mask_safe = ~mask_static_unsafe
+            if np.any(mask_safe):
+                return paths[mask_safe], vels[mask_safe], cp_violation
+            return None, None, cp_violation
 
         if len(predictions) > 0:
             pred_list = list(predictions.values())
@@ -860,15 +869,47 @@ class FunctionalCPMPC:
         paths: np.ndarray,                # (P, T+1, 2)
         vels: np.ndarray,                 # (P, T, 2)
         goal: np.ndarray,                 # (2,)
+        predictions: Optional[Dict] = None,
     ) -> Tuple[int, float]:
 
-        # -----------------------------
-        # Standard MPC terms
-        # -----------------------------
+        P, T1, _ = paths.shape
+        T = T1 - 1
+
         intermediate = self.weights.w_intermediate * np.sum((paths[:, :-1, :] - goal) ** 2, axis=(-2, -1))
         terminal = self.weights.w_terminal * np.sum((paths[:, -1, :] - goal) ** 2, axis=-1)
         control = self.weights.w_control * np.sum(vels ** 2, axis=(-2, -1))
         total_cost = intermediate + terminal + control
+
+        # Soft safety penalty: sum over horizon of max(0, r_safe - d_lower)^2
+        if self.safety_mode == "soft" and predictions and len(predictions) > 0:
+            pred_list = list(predictions.values())
+            pred_arr = np.asarray(pred_list, dtype=np.float32)   # (M, T_pred, 2)
+            if pred_arr.ndim == 3:
+                pred_arr = pred_arr.transpose(1, 0, 2)           # (T_pred, M, 2)
+                T_use = min(T, pred_arr.shape[0])
+                safety_pen = np.zeros(P, dtype=np.float32)
+
+                for t in range(T_use):
+                    x_t = paths[:, t + 1, :]                     # (P, 2)
+                    obs_t = pred_arr[t]                           # (M, 2)
+                    diff = x_t[:, None, :] - obs_t[None, :, :]   # (P, M, 2)
+                    d_nom = np.min(np.linalg.norm(diff, axis=-1), axis=1)  # (P,)
+
+                    if self.CP:
+                        U_vec = self.evaluate_U_batch(x_t, t)    # (P,)
+                        d_lower = np.maximum(d_nom - U_vec, 0.0)
+                    else:
+                        d_lower = d_nom
+
+                    # ICS-relaxed effective safety radius
+                    a_lat_max = self.max_v * self.max_w
+                    delta_evade = 0.5 * a_lat_max * (t * self.dt) ** 2
+                    effective_r_safe = max(0.0, self.safe_rad - delta_evade)
+
+                    violation = np.maximum(0.0, effective_r_safe - d_lower)
+                    safety_pen += violation ** 2
+
+                total_cost = total_cost + self.weights.w_safety * safety_pen
 
         best_idx = int(np.argmin(total_cost))
         best_cost = float(total_cost[best_idx])

@@ -256,6 +256,8 @@ def run_fcp_mpc(
     # ---- knobs mapped from "controller_configs"
     target_miscoverage_level: float = 0.1,  # -> alpha
     step_size: float = 10.0,                # -> eta (safety weight update)
+    adaptive: bool = True,                  # True = ACP online update; False = fixed offline coeffs
+    safety_mode: str = "hard",              # "hard" = filter paths; "soft" = penalty in cost
 ):
     # ----- fixed controller settings -----
     time_horizon = 17            
@@ -337,9 +339,9 @@ def run_fcp_mpc(
             max_angular_z=float(max_angular_z),
             n_paths=int(n_paths),
             seed=0,
-            risk_level=0.8,          # keep your default
-            step_size=float(step_size),
             CP=True,
+            adaptive=bool(adaptive),
+            safety_mode=str(safety_mode),
         )
 
         robot_xy = np.asarray(init_robot_pose[:2], dtype=np.float32).copy()

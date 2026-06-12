@@ -86,14 +86,24 @@ if __name__ == "__main__":
         'acp-mpc': {'target_miscoverage_level': 0.2, 'step_size': 0.05},
         'ecp-mpc': {'target_miscoverage_level': 0.1, 'step_size': 0.02},
         'cc': {'risk_level': -2., 'step_size': 5000},
-        'fcp-mpc': {'target_miscoverage_level': 0.1, 'step_size': 10.0},
+        # Legacy alias (hard + adaptive)
+        'fcp-mpc': {'target_miscoverage_level': 0.1, 'step_size': 10.0, 'adaptive': True, 'safety_mode': 'hard'},
+        # Four explicit variants for the ablation study
+        'fcp-hard-adaptive':    {'target_miscoverage_level': 0.1, 'step_size': 10.0, 'adaptive': True,  'safety_mode': 'hard'},
+        'fcp-hard-nonadaptive': {'target_miscoverage_level': 0.1, 'step_size': 10.0, 'adaptive': False, 'safety_mode': 'hard'},
+        'fcp-soft-adaptive':    {'target_miscoverage_level': 0.1, 'step_size': 10.0, 'adaptive': True,  'safety_mode': 'soft'},
+        'fcp-soft-nonadaptive': {'target_miscoverage_level': 0.1, 'step_size': 10.0, 'adaptive': False, 'safety_mode': 'soft'},
     }
 
     eval_functions = {
         'cc': run_cc,
         'acp-mpc': run_acp_mpc,
         'ecp-mpc': run_ecp_mpc,
-        'fcp-mpc': run_fcp_mpc
+        'fcp-mpc':              run_fcp_mpc,
+        'fcp-hard-adaptive':    run_fcp_mpc,
+        'fcp-hard-nonadaptive': run_fcp_mpc,
+        'fcp-soft-adaptive':    run_fcp_mpc,
+        'fcp-soft-nonadaptive': run_fcp_mpc,
     }
 
     eval_task_configs = {
