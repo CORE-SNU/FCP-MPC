@@ -169,6 +169,21 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(os.path.dirname(__file__), 'traj'), exist_ok=True)
     np.save(os.path.join(os.path.dirname(__file__), f'traj/{args.dataset}_{args.controller}.npy'), trajectories)
 
+    # ---- static trajectory image (asset-free, generated on every run) ----
+    try:
+        from viz_traj import save_traj_image_2d
+        img_path = os.path.join(os.path.dirname(__file__), f'traj/{args.dataset}_{args.controller}.png')
+        save_traj_image_2d(
+            trajectories=trajectories,
+            goal=task_kwargs.get('goal_pos'),
+            start=task_kwargs.get('init_robot_pose', np.zeros(3))[:2],
+            title=f'{args.dataset} / {args.controller}',
+            out_path=img_path,
+        )
+        print(f'[traj-img] saved {img_path}')
+    except Exception as e:
+        print(f'[traj-img] skipped ({e})')
+
     # ---- JSON to save ----
     dict_to_save = {
         "dataset": args.dataset,

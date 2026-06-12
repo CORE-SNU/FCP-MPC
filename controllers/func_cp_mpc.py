@@ -32,6 +32,7 @@ class CPOnlineAdapter:
         eta: float = 0.15,
         warmup_frames: int = 15,
         coeff_limits: Tuple[float, float] = (1e-4, 10.0),
+        n_anchors: int = 256,
     ):
         if cp_params is None or len(cp_params) == 0:
             raise ValueError("CPOnlineAdapter requires non-empty cp_params.")
@@ -45,6 +46,32 @@ class CPOnlineAdapter:
         self.grid_W = int(grid_W)
         _, _, self.Xg, self.Yg = build_grid(self.box, self.grid_H, self.grid_W)
         self.vector_size = int(self.grid_H * self.grid_W)
+
+        # --- anchor points for the cheap online projection (paper Eq. 9 & 23) ---
+        # Projecting the realized residual through the full H*W grid SDF is the
+        # online bottleneck. Instead we evaluate the residual at a fixed strided
+        # subset of grid anchors and project with the basis restricted to those
+        # anchors, realizing the O(p*M) coefficient update the paper claims.
+        # Basis and mean are fixed offline, so the anchor slices are precomputed.
+        flat_x = np.asarray(self.Xg, dtype=np.float32).reshape(-1)
+        flat_y = np.asarray(self.Yg, dtype=np.float32).reshape(-1)
+        stride = max(1, int(round(math.sqrt(self.vector_size / float(max(1, n_anchors))))))
+        ii = np.arange(0, self.grid_H, stride)
+        jj = np.arange(0, self.grid_W, stride)
+        anchor_idx = (ii[:, None] * self.grid_W + jj[None, :]).reshape(-1).astype(np.int64)
+        self.anchor_idx = anchor_idx
+        self.anchor_x = flat_x[anchor_idx]
+        self.anchor_y = flat_y[anchor_idx]
+        self.n_anchors = int(anchor_idx.size)
+        # Rescale the anchor sum back to the full-grid sum so the online coeff stays
+        # on the same scale as the offline coeff_upper it is compared against.
+        self.proj_scale = float(self.vector_size) / float(self.n_anchors)
+        self._phi_anchor = [
+            np.asarray(p.phi_basis, dtype=np.float32)[:, anchor_idx] for p in self.base_params
+        ]
+        self._mean_anchor = [
+            np.asarray(p.mean, dtype=np.float32).reshape(-1)[anchor_idx] for p in self.base_params
+        ]
 
         self.target_violation = float(target_violation)
         self.eta = float(eta)
@@ -142,20 +169,21 @@ class CPOnlineAdapter:
             return None
         pred_rel = pred_pts - self.world_center[None, :]
         true_rel = actual_pts - self.world_center[None, :]
-        sdf_pred = distance_field_points(pred_rel, self.Xg, self.Yg)
-        sdf_true = distance_field_points(true_rel, self.Xg, self.Yg)
+        # Residual evaluated only at the fixed anchor set (length M), not the full grid.
+        sdf_pred = distance_field_points(pred_rel, self.anchor_x, self.anchor_y)
+        sdf_true = distance_field_points(true_rel, self.anchor_x, self.anchor_y)
         return (sdf_pred - sdf_true).astype(np.float32)
 
     def _project_coefficients(self, step_idx: int, field: np.ndarray) -> Optional[np.ndarray]:
         idx = self.idx_map.get(int(step_idx))
         if idx is None:
             return None
-        vec = field.reshape(-1).astype(np.float32)
-        if vec.shape[0] != self.vector_size:
+        vec = np.asarray(field, dtype=np.float32).reshape(-1)
+        if vec.shape[0] != self.n_anchors:
             return None
-        params = self.base_params[idx]
-        centered = vec - params.mean.reshape(-1)
-        coeff = centered @ params.phi_basis.T
+        # Anchor-restricted projection, rescaled to the full-grid coefficient scale.
+        centered = vec - self._mean_anchor[idx]
+        coeff = self.proj_scale * (self._phi_anchor[idx] @ centered)
         return coeff.astype(np.float32)
 
     def _apply_update(self, step_idx: int, coeff: np.ndarray) -> bool:
@@ -353,9 +381,15 @@ class FunctionalCPMPC:
         i, j = ij
         return i * self.grid_W + j
 
-    def set_cp_params(self, params_list: List[CPStepParameters]) -> None:
+    def set_cp_params(self, params_list: List[CPStepParameters], build_grid: bool = True) -> None:
         """
         Cache CPStepParameters for online envelope evaluations.
+
+        build_grid : bool
+            If True, also materialize the dense H*W*N envelope grid for O(1)
+            pointwise lookup (used by the fixed/offline controller). During online
+            adaptation this is left False and U is evaluated directly from the
+            (low-dimensional) coefficients, so a full grid is not rebuilt per step.
         """
         if params_list is None or len(params_list) == 0:
             raise ValueError("cp_params must be a non-empty list.")
@@ -366,7 +400,7 @@ class FunctionalCPMPC:
                 )
         sorted_params = sorted(params_list, key=lambda p: int(p.t_idx))
         self.params = {int(p.t_idx): p for p in sorted_params}
-        self.U_grid = self._build_cp_grid_from_params(sorted_params)
+        self.U_grid = self._build_cp_grid_from_params(sorted_params) if build_grid else None
 
     def get_cp_params(self) -> List[CPStepParameters]:
         """
@@ -529,7 +563,9 @@ class FunctionalCPMPC:
         if self.CP and self.adaptive and self._cp_adapter is not None:
             updated = self._cp_adapter.step(self._frame_idx, obs_dict, predictions)
             if updated:
-                self.set_cp_params(self._cp_adapter.snapshot())
+                # Refresh coefficients only; skip the dense grid rebuild so the
+                # online update stays O(p*M) (envelope is evaluated from params).
+                self.set_cp_params(self._cp_adapter.snapshot(), build_grid=False)
 
         boxes = boxes or []
 

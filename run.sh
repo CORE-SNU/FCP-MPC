@@ -43,3 +43,7 @@ for dataset in "${datasets[@]}"; do
         "${cmd[@]}"
     done
 done
+
+# Aggregate all metric/ JSONs into the LaTeX results table.
+echo "Building results table..."
+python "$SCRIPT_DIR/make_table_2d.py"

@@ -436,6 +436,9 @@ def run_suite(
     out_dt_fail_frac: float = 0.05,
     fail_on: str = "loop",
     dump_json: bool = True,
+    save_traj_img: bool = False,
+    traj_img_dir: str = "traj_3d",
+    traj_img_max_seeds: int = 3,
 ) -> None:
     _safe_mkdir_for_file(csv_path)
     all_rows: List[EpisodeResult] = []
@@ -452,13 +455,22 @@ def run_suite(
 
         exp_over = dict(spec.get("over", {}))
 
-        for seed in seeds:
+        for seed_idx, seed in enumerate(seeds):
             env_kwargs = dict(env_base)
             exp_kwargs = dict(exp_base)
             exp_kwargs.update(exp_over)
 
             exp_kwargs.setdefault("visualize", False)
             exp_kwargs.setdefault("save_rrd", False)
+
+            # Only dump trajectory images for the first few seeds: enough to show
+            # the method works across seeds without one PNG per sweep entry.
+            if save_traj_img and seed_idx < traj_img_max_seeds:
+                exp_kwargs["save_traj_img"] = True
+                exp_kwargs["traj_img_path"] = os.path.join(
+                    traj_img_dir, f"{method_name}_seed{seed}.png"
+                )
+                exp_kwargs["method_name"] = method_name
 
             row = run_one_episode_wrapper(
                 QuadWorldEnv3D=QuadWorldEnv3D,
@@ -517,6 +529,12 @@ def main():
     ap.add_argument("--fail-on", type=str, default="loop", choices=["loop", "ctrl"])
     ap.add_argument("--dump-json", action="store_true", default=True)
     ap.add_argument("--n-obs", type=int, default=280, help="Number of dynamic obstacles")
+    ap.add_argument("--save-traj-img", action="store_true", default=False,
+                    help="Dump a static 3D trajectory PNG per (method, seed)")
+    ap.add_argument("--traj-img-dir", type=str, default="traj_3d",
+                    help="Output dir for trajectory PNGs")
+    ap.add_argument("--traj-img-max-seeds", type=int, default=3,
+                    help="Only dump trajectory PNGs for the first N seeds")
     args = ap.parse_args()
 
     selected = _parse_methods_arg(args.methods)
@@ -557,6 +575,9 @@ def main():
         out_dt_fail_frac=args.out_dt_fail_frac,
         fail_on=args.fail_on,
         dump_json=args.dump_json,
+        save_traj_img=args.save_traj_img,
+        traj_img_dir=args.traj_img_dir,
+        traj_img_max_seeds=args.traj_img_max_seeds,
     )
 
 

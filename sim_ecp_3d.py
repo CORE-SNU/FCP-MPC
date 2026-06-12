@@ -112,7 +112,11 @@ def run_one_episode_ecp_3d_rerun(
     save_rrd: bool = False,
     rrd_path: str = "quad_ecp_3d.rrd",
     # perf params
-    collect_timing: bool = True,    
+    collect_timing: bool = True,
+    # static traj image
+    save_traj_img: bool = False,
+    traj_img_path: str = "traj_3d/ecp.png",
+    method_name: str = "ECP-MPC",
 ):
     if weights is None:
         weights = MPC3DWeights(w_terminal=10.0, w_intermediate=1.0, w_control=0.001)
@@ -167,6 +171,7 @@ def run_one_episode_ecp_3d_rerun(
 
     # rerun trajectory
     robot_traj: List[np.ndarray] = []
+    last_obs_now = np.zeros((0, 3), dtype=np.float32)
 
     for k in range(int(max_steps)):
         t_loop0 = time.perf_counter()
@@ -177,6 +182,7 @@ def run_one_episode_ecp_3d_rerun(
         robot = np.asarray(obs["robot_xyz"], dtype=np.float32).reshape(3,)
         yaw = float(obs["robot_yaw"])
         robot_vel = np.asarray(obs.get("robot_vel", np.zeros(3, dtype=np.float32)), dtype=np.float32).reshape(3,)
+        robot_traj.append(robot.copy())
 
         # stop
         if float(np.linalg.norm(robot - goal)) <= float(goal_finish_dist):
@@ -185,6 +191,8 @@ def run_one_episode_ecp_3d_rerun(
 
         # collision (current)
         obs_now = _get_obs_positions_from_history(obs)
+        if obs_now.size:
+            last_obs_now = obs_now
         dmin_now = _min_dist_robot_to_points(robot, obs_now) if obs_now.size else float("inf")
         if dmin_now < safe_rad:
             n_collisions += 1
@@ -249,7 +257,6 @@ def run_one_episode_ecp_3d_rerun(
 
         # ---- rerun logging (cheap) ----
         if visualize and (only_log_every <= 1 or k % only_log_every == 0):
-            robot_traj.append(robot.copy())
             tr = np.asarray(robot_traj, dtype=np.float32)
 
             rr.log("world/robot", rr.Points3D(robot.reshape(1, 3), radii=robot_rad, colors=[255, 217, 0]))
@@ -304,6 +311,25 @@ def run_one_episode_ecp_3d_rerun(
         _summ(timing_loop_ms, "total loop")
         print("===================================\n")
 
+    robot_traj_arr = np.asarray(robot_traj, dtype=np.float32).reshape(-1, 3)
+
+    # ---- static trajectory image (headless, no Rerun needed) ----
+    if save_traj_img:
+        from viz_traj import save_traj_image_3d
+        title = (f"{method_name} | steps={steps} coll={n_collisions} "
+                 f"infeas={n_infeasible} reached={reached_goal}")
+        saved = save_traj_image_3d(
+            robot_traj=robot_traj_arr,
+            goal=goal,
+            start=robot_traj_arr[0] if robot_traj_arr.size else None,
+            obstacles=last_obs_now,
+            bounds=(env.xlim, env.ylim, env.zlim),
+            title=title,
+            out_path=traj_img_path,
+        )
+        if saved:
+            print(f"[traj-img] saved {saved}")
+
     return {
         "reached_goal": bool(reached_goal),
         "steps": int(steps),
@@ -311,6 +337,7 @@ def run_one_episode_ecp_3d_rerun(
         "infeasible_steps": int(n_infeasible),
         "ctrl_times_ms": list(timing_ctrl_ms) if collect_timing else [],
         "loop_times_ms": list(timing_loop_ms) if collect_timing else [],
+        "robot_traj": robot_traj_arr.tolist(),
     }
 
 

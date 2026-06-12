@@ -443,6 +443,9 @@ def run_one_episode_visual_3d(
     rrd_path: str = "cp_mpc_3d.rrd",
     only_log_every: int = 1,
     visualize: bool = False,
+    save_traj_img: bool = False,
+    traj_img_path: str = "traj_3d/fcp.png",
+    method_name: str = "FCP-MPC",
 ):
     safe_rad = ROBOT_RAD + OBSTACLE_RAD
 
@@ -534,17 +537,23 @@ def run_one_episode_visual_3d(
     reached_goal = False
     steps = 0
 
+    robot_traj: List[np.ndarray] = []        # always recorded for the static traj image
+    last_obs_now = np.zeros((0, 3), dtype=np.float32)
+
     for k in range(max_steps):
         t_loop0 = time.perf_counter()
 
         robot = np.asarray(obs["robot_xyz"], dtype=np.float32).reshape(3,)
         yaw = float(obs["robot_yaw"])
+        robot_traj.append(robot.copy())
 
         if np.linalg.norm(robot - goal) <= goal_finish_dist:
             reached_goal = True
             break
 
         obs_now = _get_obs_positions_from_history(obs)                           # current obstacles (after step)
+        if obs_now.size:
+            last_obs_now = obs_now
 
         dmin_now = _min_dist_robot_to_points(robot, obs_now) if obs_now.size else float("inf")
         if dmin_now < safe_rad:
@@ -660,6 +669,28 @@ def run_one_episode_visual_3d(
             rrd_path=rrd_path,
             only_log_every=only_log_every,
         )
+
+    robot_traj_arr = np.asarray(robot_traj, dtype=np.float32).reshape(-1, 3)
+
+    # ----------------------------
+    # 5) Static trajectory image (headless, no Rerun needed)
+    # ----------------------------
+    if save_traj_img:
+        from viz_traj import save_traj_image_3d
+        title = (f"{method_name} | steps={total_frames} coll={n_collisions} "
+                 f"infeas={n_infeasible} reached={reached_goal}")
+        saved = save_traj_image_3d(
+            robot_traj=robot_traj_arr,
+            goal=goal,
+            start=robot_traj_arr[0] if robot_traj_arr.size else None,
+            obstacles=last_obs_now,
+            bounds=(env.xlim, env.ylim, env.zlim),
+            title=title,
+            out_path=traj_img_path,
+        )
+        if saved:
+            print(f"[traj-img] saved {saved}")
+
     return {
         "reached_goal": bool(reached_goal),
         "steps": int(total_frames),
@@ -667,6 +698,7 @@ def run_one_episode_visual_3d(
         "infeasible_steps": int(n_infeasible),
         "ctrl_times_ms": list(timing["ctrl_ms"]),
         "loop_times_ms": list(timing["loop_ms"]),
+        "robot_traj": robot_traj_arr.tolist(),
     }
 
 

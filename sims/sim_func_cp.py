@@ -381,6 +381,10 @@ def run_fcp_mpc(
                 obst_pred_traj=pred,
                 obst_mask=obst_mask,
                 goal=goal,
+                # Realized obstacle positions for the online ACP coefficient update.
+                # Without this, CPOnlineAdapter never sees ground truth and the
+                # `adaptive` flag is a no-op (adaptive == fixed). See func_cp_mpc.py.
+                observations=h_dict,
             )
             t1 = time.perf_counter()
             ctrl_times_ms.append((t1 - t0) * 1000.0)

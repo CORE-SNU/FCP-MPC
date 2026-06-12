@@ -69,6 +69,9 @@ def run_one_episode_rerun_simple(
     save_rrd: bool = False,
     rrd_path: str = "quad_cc_3d_simple.rrd",
     visualize: bool = True,
+    save_traj_img: bool = False,
+    traj_img_path: str = "traj_3d/cc.png",
+    method_name: str = "CC-MPC",
 ):
     safe_rad = ROBOT_RAD + OBSTACLE_RAD
 
@@ -111,6 +114,7 @@ def run_one_episode_rerun_simple(
     timing_loop_ms: List[float] = []
 
     robot_traj: List[np.ndarray] = []
+    last_obs_now = np.zeros((0, 3), dtype=np.float32)
     vx_global, vy_global, vz_global, yaw_rate = 0.0, 0.0, 0.0, 0.0
 
     for k in range(max_steps):
@@ -121,6 +125,7 @@ def run_one_episode_rerun_simple(
 
         robot = np.asarray(obs["robot_xyz"], dtype=np.float32).reshape(3,)
         yaw = float(obs["robot_yaw"])
+        robot_traj.append(robot.copy())
 
         # ---- stop condition (same timing as your example: check before stepping) ----
         if np.linalg.norm(robot - goal) <= goal_finish_dist:
@@ -129,6 +134,8 @@ def run_one_episode_rerun_simple(
 
         # ---- collision counting (same as your example) ----
         obs_now = _get_obs_positions_from_history(obs)
+        if obs_now.size:
+            last_obs_now = obs_now
         dmin_now = _min_dist_robot_to_points(robot, obs_now) if obs_now.size else float("inf")
         if dmin_now < safe_rad:
             n_collisions += 1
@@ -179,7 +186,6 @@ def run_one_episode_rerun_simple(
 
         if visualize:
         # ---- rerun logging: drone + obstacles + traj only ----
-            robot_traj.append(robot.copy())
             tr = np.asarray(robot_traj, dtype=np.float32)
 
             rr.log("world/robot", rr.Points3D(robot.reshape(1, 3), radii=ROBOT_RAD, colors=[255, 217, 0]))
@@ -227,7 +233,26 @@ def run_one_episode_rerun_simple(
         _summ(timing_step_ms, "env.step (physics)")
         _summ(timing_loop_ms, "total loop")
         print("===================================\n")
-    
+
+    robot_traj_arr = np.asarray(robot_traj, dtype=np.float32).reshape(-1, 3)
+
+    # ---- static trajectory image (headless, no Rerun needed) ----
+    if save_traj_img:
+        from viz_traj import save_traj_image_3d
+        title = (f"{method_name} | steps={total_frames} coll={n_collisions} "
+                 f"infeas={n_infeasible} reached={reached_goal}")
+        saved = save_traj_image_3d(
+            robot_traj=robot_traj_arr,
+            goal=goal,
+            start=robot_traj_arr[0] if robot_traj_arr.size else None,
+            obstacles=last_obs_now,
+            bounds=(env.xlim, env.ylim, env.zlim),
+            title=title,
+            out_path=traj_img_path,
+        )
+        if saved:
+            print(f"[traj-img] saved {saved}")
+
     return {
         "reached_goal": bool(reached_goal),
         "steps": int(total_frames),
@@ -235,6 +260,7 @@ def run_one_episode_rerun_simple(
         "infeasible_steps": int(n_infeasible),
         "ctrl_times_ms": list(timing_ctrl_ms),
         "loop_times_ms": list(timing_loop_ms),
+        "robot_traj": robot_traj_arr.tolist(),
     }
 
 if __name__ == "__main__":
