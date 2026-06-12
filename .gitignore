@@ -1,17 +1,26 @@
+# editor / python junk
 **/__pycache__
 **/.vscode
+
+# bulky data & media (regenerable, not needed in git)
 **/*.mp4
 **/*.avi
+**/*.mov
 **/*.csv
 **/*.xlsx
 **/*.pkl
-**/*.png
 **/*.npy
-**/metric_3d
-**/metric_2d
+**/*.npz
 **/*.txt
 **/*.json
-**/*.txt
-**/*.mov
-**/*.cls
+**/metric_3d
+**/metric_2d
+
+# Figures, bibliography and class files are ignored everywhere EXCEPT the
+# paper folder (T_RO2026), whose assets the LaTeX build needs.
+**/*.png
 **/*.bib
+**/*.cls
+!T_RO2026/*.png
+!T_RO2026/*.bib
+!T_RO2026/*.cls
