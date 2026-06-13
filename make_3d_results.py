@@ -42,7 +42,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 
 from make_figs_3d import (ENV_KWARGS, EXP_BASE, METHODS, build_env, make_figure,
-                          PAPER_DIR)
+                          PAPER_DIR, run_fcp)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 METRIC_DIR = os.path.join(HERE, "metric_3d")
@@ -56,6 +56,10 @@ SCAL_OUT = os.path.join(PAPER_DIR, "control_time_3d.png")
 # label -> (run_fn, extras); reuse the exact method configs from make_figs_3d
 METHOD_MAP = {m[0]: (m[1], m[2]) for m in METHODS}
 METHOD_LABELS = [m[0] for m in METHODS]
+# Nominal MPC (no conformal calibration) -- included in table/scalability only;
+# make_figure iterates make_figs_3d.METHODS (4) so it is excluded from Fig.6.
+METHOD_MAP["Nominal MPC"] = (run_fcp, {"CP": False, "n_calib_samples": 0, "break_on_collision": True})
+METHOD_LABELS.append("Nominal MPC")
 
 
 # ----------------------------------------------------------------------------- metrics

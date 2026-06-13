@@ -23,30 +23,27 @@ def main():
     })
     plt.figure(figsize=(3.6, 2.8))
 
-    method_mapping = {
-        'acp': 'ACP-MPC',
-        'cc': 'CC-MPC',
-        'ecp': 'ECP-MPC',
-        'fcp': 'Proposed (FCP-MPC)'
-    }
-    df['method_display'] = df['method'].map(method_mapping).fillna(df['method'])
-    # Ordered by development year: ACP, CC, ECP, FCP (ours).
-    order = [m for m in ['ACP-MPC', 'CC-MPC', 'ECP-MPC', 'Proposed (FCP-MPC)']
-             if m in set(df['method_display'])]
+    # normalize legacy short names; the unified driver already uses display names
+    short = {'acp': 'ACP-MPC', 'cc': 'CC-MPC', 'ecp': 'ECP-MPC',
+             'fcp': 'FCP-MPC (ours)', 'nocp': 'Nominal MPC'}
+    df['method_display'] = df['method'].map(lambda m: short.get(m, m))
 
-    sns.lineplot(
-        data=df,
-        x='n_obs',
-        y='ctrl_mean_ms',
-        hue='method_display',
-        style='method_display',
-        hue_order=order,
-        style_order=order,
-        markers=True,
-        dashes=False,
-        linewidth=2.0,
-        markersize=6
-    )
+    # colours/markers consistent with the trajectory figure (make_figs_3d); ours emphasized
+    style = {
+        "CC-MPC":         ("#7f7f7f", "-",  "o", 1.8, 5),
+        "ECP-MPC":        ("#ff7f0e", "-",  "s", 1.8, 5),
+        "ACP-MPC":        ("#9467bd", "-",  "^", 1.8, 5),
+        "Nominal MPC":    ("#8c564b", "--", "D", 1.8, 5),
+        "FCP-MPC (ours)": ("#1f77b4", "-",  "*", 2.8, 9),
+    }
+    order = [m for m in ["CC-MPC", "ECP-MPC", "ACP-MPC", "Nominal MPC", "FCP-MPC (ours)"]
+             if m in set(df['method_display'])]
+    for m in order:
+        sub = (df[df['method_display'] == m]
+               .groupby('n_obs')['ctrl_mean_ms'].mean().reset_index().sort_values('n_obs'))
+        c, ls, mk, lw, ms = style.get(m, ("0.5", "-", "o", 1.8, 5))
+        plt.plot(sub['n_obs'], sub['ctrl_mean_ms'], color=c, linestyle=ls,
+                 marker=mk, linewidth=lw, markersize=ms, label=m)
 
     plt.yscale('log')
 
