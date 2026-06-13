@@ -34,6 +34,7 @@
 \newtheorem{definition}{Definition}
 \newtheorem{assumption}{Assumption}
 \newtheorem{lemma}{Lemma}
+\newtheorem{problem}{Problem}
 \newtheorem{remark}{Remark}
 \newtheorem{example}{Example}
 \newtheorem{corollary}{Corollary}
@@ -184,7 +185,7 @@ On $\mathcal{D}_{\leq t}$ the observations are fused into an SDF estimate $D_{\l
 
 
 
-Since $\mathcal{O}_{t+i}$ for $i > 0$ are inherently unobservable at time $t$, all we can do is estimate them from historical or contextual data, as modern prediction models do. Let us denote the $i$-step ahead prediction of the occupancy made at $t$ by $\mathcal{O}_{t+i|t}$ 
+Since the future occupancy $\mathcal{O}_{t+i}$ for $i > 0$ is unobservable at time $t$, it must be estimated from historical and contextual data, as modern prediction models do. We denote the $i$-step-ahead prediction made at $t$ by $\mathcal{O}_{t+i|t}$.
 For safe motion planning, we are interested in correctly estimating the (signed) distance function at $t+i$:
 \begin{equation*}
 D_{t+i}(x) \coloneqq d(x, \mathcal{O}_{t+i}), \quad x \in \mathcal{X}
@@ -194,8 +195,17 @@ and its $i$-step ahead prediction be:
 D_{t+i|t}(x) \coloneqq d(x, \mathcal{O}_{t+i|t}), \quad x \in \mathcal{X}
 \end{equation*}
 
+\begin{problem}[Motion Planning with Safety Guarantee]
+Given a goal configuration and the fused SDF estimate $D_{\leq t}$, the objective is to
+generate a control policy that drives the robot toward the goal while satisfying, over
+the planning horizon $i = 1,\dots,H$,
+\begin{align*}
+\mathbb{P}\!\left[\, D_{t+i}\!\left(x_{t+i}\right) \ge 0, \ \ \forall i \in \{1,\dots,H\} \,\right] \;\ge\; 1-\alpha,
+\end{align*}
+where $x_{t+i}$ denotes the robot position at time $t+i$ under the policy.
+\end{problem}
 
-To avoid the overestimation of $D_{t+i}$ (which may cause catastrophic events), we consider the following form of score function:
+To avoid overestimating $D_{t+i}$, which can lead to catastrophic collisions, we consider the following score function:
 \begin{equation}\label{eq:functional-score}
 S_{t+i|t} (x) \coloneqq D_{t+i|t}(x) - D_{t+i}(x), \quad x\in \mathcal{X}.
 \end{equation}
@@ -277,8 +287,8 @@ The projection coefficients $\xi_{i,j}(S)=\langle S,\varphi_{i,j}\rangle$ genera
 integration over $\mathcal X$, which is expensive when $S$ is only available through costly
 distance-transform evaluations on a fine grid.
 Therefore, in implementation we approximate the projection (or its pointwise evaluations)
-using only finitely many anchor points $\bar{\mathcal X}\subset\mathcal X$, as described in
-Section~\ref{sec:approximation}.
+using only finitely many grid points $\bar{\mathcal X}\subset\mathcal X$, as described in
+Section~\ref{sec:score-comp}.
 
 \paragraph{Inductive conformal calibration in coefficient space}
 \label{sec:icp_coeff}
@@ -415,7 +425,7 @@ U_{t+i\mid t}(x) \coloneqq{}& \varepsilon_i + \max_{1\le k\le K} \Bigl\{ \wideha
 \end{equation}
 
 
-\subsection{Computation of Score Function}
+\subsection{Computation of Score Function}\label{sec:score-comp}
 
 Evaluating $S_{t+i|t}$~\eqref{eq:functional-score} for all $x\in \mathcal{X}$ induces a substantial amount of computational overhead in practice, especially when $\mathcal{X}$ is large. While computing the distance $d(x, \mathcal{O}_{t+i})$ is costly per se, computing $S_{t+i|t}$ for all $x$ essentially requires the fine discretization of $\mathcal{X}$ and the computation of $S_{t+i|t}$ on the discretization mesh. In such a case, the complexity of the evaluation would be $O(r^{-d})$, where $r > 0$ is the resolution of the discretization, i.e., distance between adjacent points. A compromise we can take would be to take a modest size of $r$ at the cost of the discretization accuracy, and add a correction term considering the accuracy. To make this rigorous, let $\bar{\mathcal{X}} \subseteq \mathcal{X}$ be the finite subset of $\mathcal{X}$ (i.e., a discretization grid), and define its resolution as
 \begin{equation*}
@@ -431,85 +441,18 @@ S_{t+i|t}(x) \leq \min_{x' \in \bar{\mathcal{X}}} \left\{ S_{t+i|t}(x') + 2\|x -
  \end{equation*}
 
 
-\subsection{Quasi-Monte Carlo Approximation of FPCA Projection Coefficients}
-\label{sec:approximation}
-
-We adapt the quasi-Monte Carlo (QMC) framework \cite{dick2013qmc} to approximate the FPCA projection coefficients $\xi_{i,j}(S_{t+i|t}) = \langle S_{t+i|t}, \varphi_{i,j} \rangle = \int_{\mathcal{X}} S_{t+i|t}(x)\,\varphi_{i,j}(x)\,dx$, where $\mathcal{X} \subset \mathbb{R}^d$, $d \in \{2,3\}$.
-
-\paragraph{Approximation.}
-Since standard QMC theory is developed on $[0,1]^d$, we first map $\mathcal{X} \subseteq [a_1,b_1]\times\cdots\times[a_d,b_d]$ to $[0,1]^d$ via the affine bijection $T(u)_\ell = a_\ell + (b_\ell-a_\ell)u_\ell$, with Jacobian $|\mathcal{B}| =
-\prod_{\ell=1}^d(b_\ell-a_\ell)$, giving
-\begin{equation*}
-\begin{gathered}
-    \xi_{i,j}(S_{t+i|t}) \;=\; |\mathcal{B}|\int_{[0,1]^d} g_{i,j}(u)\,du, \\
-    g_{i,j}(u) := S_{t+i|t}(T(u))\,\varphi_{i,j}(T(u)).
-\end{gathered}
-\end{equation*}
-
-Given $M$ anchor points $\{x^{(k)}\}_{k=1}^M \subset \mathcal{X}$, we approximate this integral by
-\begin{equation}\label{eq:qmc-coeff}
-    \hat{\xi}_{i,j}(S_{t+i|t}) \;:=\; \frac{|\mathcal{B}|}{M}\sum_{k=1}^{M} S_{t+i|t}(x^{(k)})\,\varphi_{i,j}(x^{(k)}).
-\end{equation}
-
-Stacking over $j=1,\ldots,p_i$, the full coefficient vector is
-\begin{equation*}
-    \hat{\xi}_i(S_{t+i|t}) \;=\; \frac{|\mathcal{B}|}{M}\,\Phi_i\,\mathbf{s}_i,
-\end{equation*}
-where $\Phi_i \in \mathbb{R}^{p_i \times M}$ with $[\Phi_i]_{j,k} = \varphi_{i,j}(x^{(k)})$ depends only on the learned basis and the fixed anchor points and is therefore computed once during training, and $\mathbf{s}_i \in \mathbb{R}^M$ with $[\mathbf{s}_i]_k = S_{t+i|t}(x^{(k)})$ is evaluated at each time step $t$. The per-step cost reduces to a single matrix, vector multiply $O(p_i M)$.
-
-\paragraph{Choice of anchor points.}
-We take $\{x^{(k)}\} = \{T(u^{(k)})\}$ where $\{u^{(k)}\}_{k=0}^{M-1} \subset [0,1]^d$ is a randomly shifted rank-1 lattice rule,
-\begin{equation*}
-    u^{(k)} = \Bigl\{\frac{k\,\mathbf{z}}{M} + \Delta\Bigr\},
-    \quad k = 0,\ldots,M-1,
-\end{equation*}
-where $\{\cdot\}$ denotes the fractional part componentwise, $\Delta \sim \mathrm{Uniform}([0,1]^d)$ is a single random shift drawn once and fixed, and $\mathbf{z} \in \mathbb{Z}^d$ is a generating vector chosen by the CBC construction of
-\cite{dick2013qmc}, which selects $\mathbf{z}$ to minimise the shift-averaged worst-case integration error over $W^{\alpha,2}([0,1]^d)$, the Sobolev space of functions whose weak derivatives up to order $\alpha$ are square-integrable. For $d \in \{2,3\}$ the CBC construction is computationally cheap and the same anchor set is reused across all horizon indices $i$ and basis indices $j$.
-
-\paragraph{Error bound and convergence.}
-We assume $g_{i,j}$ belongs to the weighted Sobolev space considered
-in \cite{kuo2003cbc}, where $W^{1,2}([0,1]^d)$ denotes the space of
-functions whose weak first-order derivatives are square-integrable,
-with norm $\|g_{i,j}\|_{W^{1,2}} < \infty$. This holds under the
-piecewise-smooth boundary assumption on $\mathcal{O}_{t+i}$, which
-ensures $S_{t+i|t} \in W^{1,2}(\mathcal{X})$, and since
-$\varphi_{i,j}$ are the leading $L^2$ principal components of a
-smooth residual sample.
-
-By \cite{kuo2003cbc}, the CBC-constructed randomly shifted rank-1
-lattice rule with $M$ points achieves the optimal rate of convergence
-for QMC rules in weighted Sobolev spaces,
-\begin{equation}\label{eq:qmc-error}
-    \mathbb{E}_\Delta\bigl|\xi_{i,j}(S_{t+i|t}) - \hat{\xi}_{i,j}(S_{t+i|t})\bigr| \;=\; O(M^{-1+\delta}) \quad \text{for any } \delta > 0,
-\end{equation}
-where the expectation is over the random shift $\Delta$ and the
-implied constant is independent of $d$. This converges to the true
-coefficient $\xi_{i,j}(S_{t+i|t})$ as $M \to \infty$, and strictly
-dominates the Monte Carlo rate $O(M^{-1/2})$. Compared to direct
-numerical integration on a fine grid of $\mathcal{X}$, which requires
-$O(N_{\mathrm{grid}})$ distance-transform evaluations with
-$N_{\mathrm{grid}} \gg M$ to achieve comparable accuracy, the QMC
-approximation \eqref{eq:qmc-coeff} attains the same limit with
-substantially fewer evaluations. Propagating \eqref{eq:qmc-error}
-via orthonormality of $\{\varphi_{i,j}\}$,
-\begin{equation}\label{eq:proj-error}
-    \mathbb{E}_\Delta\bigl\|\pi_{\mathscr{V}_i} S_{t+i|t} - \hat{\pi}_{\mathscr{V}_i} S_{t+i|t} \bigr\|_{L^2(\mathcal{X})} = O\bigl(\sqrt{p_i}\,M^{-1+\delta}\bigr)
-\end{equation}
-for any $\delta > 0$, so the approximation error in the projected score function vanishes
-as $M \to \infty$, while the per-step computational cost remains
-$O(p_i M)$, substantially lower than direct numerical integration
-over a fine grid of $\mathcal{X}$.
-
-
 %%%%%% yoonseok edit
 
 \section{Functional CP-informed MPC}
 \label{sec:cp_mpc}
 
-We now incorporate the conformalized signed-distance lower bound into a receding-horizon motion planner.
-Our controller follows the general safe-planning template of~\cite{lindemann2023safeplanning}, but is adapted to the present \emph{fieldwise} uncertainty representation.
-The key feature is an \emph{offline--online decomposition in coefficient space}: offline, we use a large calibration dataset and a GMM-based functional conformal procedure to construct an accurate \emph{initial} coefficient upper bound; online, once the robot starts moving, the GMM model is no longer used, and the coefficient upper bound is updated directly using only online residual observations and a target violation level.
-Figure~\ref{fig:overview} summarizes the resulting offline--online pipeline.
+We now incorporate the conformalized signed-distance lower bound into a receding-horizon motion planner, following the general safe-planning template of~\cite{lindemann2023safeplanning} but adapting it to our \emph{fieldwise} uncertainty representation.
+The central idea is to conformalize the safety bound over the \emph{entire field} offline, rather than point by point online.
+Since the calibrated bound lives in a compact functional (coefficient) form, the expensive computation---fitting the basis and an accurate \emph{initial} bound from a large calibration dataset through a GMM-based functional conformal procedure---is carried out once, offline, and cached.
+Online, the planner no longer recomputes per-point distances; it simply consults this precomputed field, projecting the realized residuals onto the cached basis and applying a lightweight update.
+Two benefits follow: the per-step cost stays well within real-time budgets, and the planner is handed a continuous, queryable safety field---directly suited to scoring the many candidate trajectories of an MPC rollout.
+The same update also absorbs the distribution shift that arises once the deployed error distribution drifts from the offline data, correcting it within the low-dimensional coefficient space rather than re-fitting the entire field (Section~\ref{subsec:online_update}).
+Figure~\ref{fig:overview} summarizes the resulting pipeline.
 
 \begin{figure}[t]
   \centering
@@ -787,7 +730,7 @@ and denote by
 the full collection of horizon-indexed tuples cached by the controller.
 Crucially, after deployment, the online controller uses only $\boldsymbol{\Pi}$ and no longer requires the fitted GMM itself.
 
-\subsection{Online adaptive update}
+\subsection{Online adaptive update}\label{subsec:online_update}
 Once the robot starts moving, the GMM is used only for the initialization above and is not evaluated online.
 At time $t$, if a realized residual field becomes available for horizon index $i$, we project it onto the cached basis:
 \begin{equation}
@@ -799,7 +742,7 @@ At time $t$, if a realized residual field becomes available for horizon index $i
 \Bigr)^\top .
 \label{eq:online_coeff}
 \end{equation}
-As in the offline stage, this projection is evaluated with the QMC anchor approximation of Section~\ref{sec:approximation}: it uses only the realized signed-distance residual at the $M$ anchor points and costs $O(p_i M)$ per horizon index, so the dense workspace grid is never reconstructed online.
+As in the offline stage, this projection is evaluated on the discretization grid $\bar{\mathcal X}$ of Section~\ref{sec:score-comp}: it uses only the realized signed-distance residual at these grid points and costs $O(p_i |\bar{\mathcal X}|)$ per horizon index, so the full workspace field need not be reconstructed online.
 We then compare the magnitude of each component of $\xi^{\mathrm{on}}_{i,t}$ against the current online upper bound
 $\hat{\xi}^{(t)}_i$.
 If the empirical violation frequency is above the target level $\alpha_{\mathrm{target}}$, the upper bound is inflated; if it is below the target level, the upper bound is contracted.
@@ -1307,8 +1250,8 @@ envelope where the offline bound was unnecessarily tight, while leaving collisio
 rates essentially unchanged.
 For the soft variant, which is already feasible by construction, adaptation yields
 only marginal changes.
-Because the update operates on the low-dimensional coefficients via the anchor
-approximation of Section~\ref{sec:approximation}, it adds only a few milliseconds
+Because the update operates on the low-dimensional coefficients evaluated on the
+discretization grid of Section~\ref{sec:score-comp}, it adds only a few milliseconds
 of online computation and stays well below the cost of ECP-MPC.
 
 \begin{figure}[!t]
