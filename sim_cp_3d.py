@@ -72,6 +72,7 @@ def run_one_episode_rerun_simple(
     save_traj_img: bool = False,
     traj_img_path: str = "traj_3d/cc.png",
     method_name: str = "CC-MPC",
+    break_on_collision: bool = False,
 ):
     safe_rad = ROBOT_RAD + OBSTACLE_RAD
 
@@ -130,6 +131,9 @@ def run_one_episode_rerun_simple(
         # ---- stop condition (same timing as your example: check before stepping) ----
         if np.linalg.norm(robot - goal) <= goal_finish_dist:
             reached_goal = True
+            break
+
+        if break_on_collision and robot[2] <= env.zlim[0] + ROBOT_RAD:
             break
 
         # ---- collision counting (same as your example) ----

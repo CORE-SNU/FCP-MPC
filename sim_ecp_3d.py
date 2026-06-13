@@ -104,6 +104,7 @@ def run_one_episode_ecp_3d_rerun(
     max_steps: int = 250,
     warmup_steps: int = 0,
     goal_finish_dist: float = 0.3,
+    break_on_collision: bool = False,
     # rerun params
     visualize: bool = True,
     log_pred: bool = False,
@@ -187,6 +188,9 @@ def run_one_episode_ecp_3d_rerun(
         # stop
         if float(np.linalg.norm(robot - goal)) <= float(goal_finish_dist):
             reached_goal = True
+            break
+
+        if break_on_collision and robot[2] <= env.zlim[0] + ROBOT_RAD:
             break
 
         # collision (current)

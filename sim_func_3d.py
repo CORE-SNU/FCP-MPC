@@ -446,6 +446,7 @@ def run_one_episode_visual_3d(
     save_traj_img: bool = False,
     traj_img_path: str = "traj_3d/fcp.png",
     method_name: str = "FCP-MPC",
+    break_on_collision: bool = False,
 ):
     safe_rad = ROBOT_RAD + OBSTACLE_RAD
 
@@ -551,6 +552,9 @@ def run_one_episode_visual_3d(
 
         if np.linalg.norm(robot - goal) <= goal_finish_dist:
             reached_goal = True
+            break
+
+        if break_on_collision and robot[2] <= z_min + ROBOT_RAD:
             break
 
         obs_now = _get_obs_positions_from_history(obs)                           # current obstacles (after step)

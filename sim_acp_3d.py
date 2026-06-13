@@ -35,6 +35,7 @@ def run_one_episode_acp_3d(
     target_miscoverage_level: float = 0.10,
     step_size: float = 0.05,
     seed: int = 0,
+    break_on_collision: bool = False,
     **_ignore,
 ):
     safe_rad = ROBOT_RAD + OBSTACLE_RAD
@@ -72,6 +73,9 @@ def run_one_episode_acp_3d(
 
         if np.linalg.norm(robot - goal) <= goal_finish_dist:
             reached_goal = True
+            break
+
+        if break_on_collision and robot[2] <= env.zlim[0] + ROBOT_RAD:
             break
 
         obs_now = _get_obs_positions_from_history(obs)

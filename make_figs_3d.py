@@ -74,10 +74,10 @@ EXP_BASE = dict(
 # (label, run_fn, method-specific kwargs, colour, linewidth, zorder).
 # Colours/labels mirror make_figs_2d.py; FCP (ours) is emphasised and drawn on top.
 METHODS = [
-    ("CC-MPC",      run_cc,  {},                                                 "#7f7f7f", 1.6, 2),
-    ("ECP-MPC",     run_ecp, {"miscoverage_level": 0.10, "step_size": 0.05},     "#ff7f0e", 1.6, 2),
-    ("ACP-MPC",     run_acp, {"target_miscoverage_level": 0.10, "step_size": 0.05}, "#9467bd", 1.6, 2),
-    ("FCP-MPC (ours)", run_fcp, {"CP": True, "alpha": 0.10},                      "#1f77b4", 2.6, 4),
+    ("CC-MPC",      run_cc,  {"break_on_collision": True},                       "#7f7f7f", 1.6, 2),
+    ("ECP-MPC",     run_ecp, {"miscoverage_level": 0.10, "step_size": 0.05, "max_steps": 100, "break_on_collision": True}, "#ff7f0e", 1.6, 2),
+    ("ACP-MPC",     run_acp, {"target_miscoverage_level": 0.10, "step_size": 0.05, "break_on_collision": True}, "#9467bd", 1.6, 2),
+    ("FCP-MPC (ours)", run_fcp, {"CP": True, "alpha": 0.10, "break_on_collision": True}, "#1f77b4", 2.6, 4),
 ]
 
 
