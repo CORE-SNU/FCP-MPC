@@ -57,7 +57,8 @@ METHODS = [
     ("cc",                "CC-MPC",            "#7f7f7f", 1.6, "-",  2),
     ("ecp-mpc",           "ECP-MPC",           "#ff7f0e", 1.6, "-",  2),
     ("acp-mpc",           "ACP-MPC",           "#9467bd", 1.6, "-",  2),
-    ("fcp-soft-adaptive", "FCP-MPC (soft, ours)", "#1f77b4", 2.8, "-", 4),
+    ("fcp-hard-adaptive", "FCP-MPC (hard, ours)", "#08519c", 2.4, "--", 4),
+    ("fcp-soft-adaptive", "FCP-MPC (soft, ours)", "#1f77b4", 2.8, "-",  5),
 ]
 
 
