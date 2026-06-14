@@ -163,10 +163,15 @@ def make_figure(data: dict, out_path: str) -> None:
         crashed = d.get("crashed", {})
         for name, _fn, _ex, color, lw, z in METHODS:
             traj = d["trajs"].get(name)
-            if traj is None or len(traj) < 2:
+            if traj is None or len(traj) == 0:
                 continue
-            ax.plot(traj[:, 0], traj[:, 1], traj[:, 2],
-                    color=color, lw=lw, alpha=0.95, zorder=z)
+            if len(traj) >= 2:
+                ax.plot(traj[:, 0], traj[:, 1], traj[:, 2],
+                        color=color, lw=lw, alpha=0.95, zorder=z)
+            else:
+                # crashed almost immediately (one logged pose): still show the
+                # method with a colored dot so it does not vanish from the panel.
+                ax.scatter(*traj[0], color=color, s=28, depthshade=False, zorder=z)
             if crashed.get(name):  # lost control / fell to the floor -> mark the crash point
                 ax.scatter(*traj[-1], c="#d62728", marker="x", s=55,
                            linewidths=2.0, depthshade=False, zorder=9)

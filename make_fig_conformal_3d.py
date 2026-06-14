@@ -33,6 +33,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import LightSource
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.interpolate import RegularGridInterpolator
 from skimage.measure import marching_cubes
@@ -106,13 +107,17 @@ def run_rollout(seed: int, n_obs: int, i_view: int) -> dict:
 # --------------------------------------------------------------------------- #
 # 2) Frame / obstacle selection
 # --------------------------------------------------------------------------- #
-def pick_frame_and_obstacles(P: dict, max_obs: int = 2, sel_radius: float = 1.6):
-    """Pick the closed-loop frame where the robot most closely approaches an
-    obstacle (a visually meaningful place to show the safety bound), then take
-    the <=max_obs obstacles nearest the robot at that frame's prediction."""
+def pick_frame_and_obstacles(P: dict, max_obs: int = 2, sel_radius: float = 1.6,
+                             min_clearance: float = 0.6):
+    """Pick a closed-loop frame where the robot passes *just outside* an obstacle's
+    conformal envelope -- i.e. the tightest approach whose clearance still exceeds
+    ``min_clearance`` -- so the path visibly skirts (rather than penetrates) the
+    safety bound. Then take the <=max_obs obstacles nearest the robot."""
     hist = P["history"]
     iv = int(P["i_view"])
-    best = None
+    traj = P["robot_traj"]
+    best = None       # tightest pass whose whole-path clearance >= min_clearance
+    fallback = None   # global closest approach, if nothing clears the band
     for k, h in enumerate(hist):
         future_idx = k + iv + 1
         if future_idx >= len(hist):
@@ -122,10 +127,16 @@ def pick_frame_and_obstacles(P: dict, max_obs: int = 2, sel_radius: float = 1.6)
             continue
         robot = h["robot"]
         d = np.linalg.norm(gt - robot[None, :], axis=1)
-        dmin = float(d.min())
-        # interesting = close but not a degenerate overlap
-        if dmin < (best[0] if best else 1e9) and dmin > P["safe_rad"] * 0.5:
-            best = (dmin, k)
+        j = int(d.argmin())
+        obs = gt[j]
+        # closest the *whole executed path* ever comes to this obstacle location:
+        # guarantees the plotted segment never dips inside the conformal envelope.
+        path_clear = float(np.linalg.norm(traj - obs[None, :], axis=1).min())
+        if path_clear < (fallback[0] if fallback else 1e9) and path_clear > P["safe_rad"] * 0.5:
+            fallback = (path_clear, k)
+        if path_clear >= min_clearance and path_clear < (best[0] if best else 1e9):
+            best = (path_clear, k)
+    best = best or fallback
     if best is None:
         raise RuntimeError("no usable frame with nearby obstacles")
     _, k = best
@@ -212,6 +223,18 @@ def iso_world(vol, level, xs, ys, zs):
     return world, faces
 
 
+def shaded_sphere(ax, center, r, color, alpha, ls, n=64):
+    """Smooth, light-shaded analytic sphere via plot_surface -- gives a solid 3D
+    'ball' look (gradient shading) instead of a flat constant-color blob."""
+    u = np.linspace(0, 2 * np.pi, n)
+    v = np.linspace(0, np.pi, n)
+    x = center[0] + r * np.outer(np.cos(u), np.sin(v))
+    y = center[1] + r * np.outer(np.sin(u), np.sin(v))
+    z = center[2] + r * np.outer(np.ones_like(u), np.cos(v))
+    ax.plot_surface(x, y, z, rstride=1, cstride=1, color=color, alpha=alpha,
+                    linewidth=0, antialiased=True, shade=True, lightsource=ls)
+
+
 # --------------------------------------------------------------------------- #
 # 4) Render
 # --------------------------------------------------------------------------- #
@@ -220,7 +243,7 @@ def render(P: dict, sel: dict, out: str, elev: float, azim: float,
            margin_floor: float = 0.20, margin_cap: float = 0.8):
     safe_rad = float(P["safe_rad"])
     centers = np.vstack([c for c in (sel["gt"], sel["pred"]) if c.size] + [sel["robot"][None]])
-    pad = safe_rad + 0.9   # room for the inflated envelope
+    pad = safe_rad + 0.55   # zoom tight: just contain the inflated envelope
     lxs, lys, lzs, Xl, Yl, Zl = local_grid(centers, safe_rad, pad, res)
 
     D_true = distance_field_points_3d(sel["gt"], Xl, Yl, Zl)
@@ -251,27 +274,37 @@ def render(P: dict, sel: dict, out: str, elev: float, azim: float,
     print(f"[render] envelope margin U={U_show:.3f}  (conformal radius "
           f"{safe_rad + U_show:.3f} vs true {safe_rad:.3f})")
 
-    Vt, Ft = iso_world(D_true, safe_rad, lxs, lys, lzs)
-    Vc, Fc = iso_world(D_lower, safe_rad, lxs, lys, lzs)
-
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["Computer Modern Roman", "DejaVu Serif", "Times New Roman"],
+        "mathtext.fontset": "cm",
+        "font.size": 10,
+    })
     if usetex:
-        plt.rcParams.update({"text.usetex": True, "font.family": "serif",
-                             "font.serif": ["Computer Modern Roman"]})
-    plt.rcParams.update({"font.size": 9})
+        plt.rcParams["text.usetex"] = True
 
-    fig = plt.figure(figsize=(4.6, 4.2), dpi=300)
+    fig = plt.figure(figsize=(4.8, 4.4), dpi=300)
     ax = fig.add_subplot(111, projection="3d")
 
-    # conformal lower-bound envelope (drawn first / underneath, translucent red)
-    if Vc is not None:
-        ax.add_collection3d(Poly3DCollection(
-            Vc[Fc], facecolor="#d62728", edgecolor="none",
-            alpha=0.16, linewidths=0))
-    # true safety boundary (solid steel-blue sphere around the real obstacle)
-    if Vt is not None:
-        ax.add_collection3d(Poly3DCollection(
-            Vt[Ft], facecolor="#1f77b4", edgecolor="none",
-            alpha=0.55, linewidths=0))
+    if envelope_mode == "field":
+        # exact (but ragged) conformal field: isosurfaces via marching cubes
+        Vc, Fc = iso_world(D_lower, safe_rad, lxs, lys, lzs)
+        Vt, Ft = iso_world(D_true, safe_rad, lxs, lys, lzs)
+        if Vc is not None:
+            ax.add_collection3d(Poly3DCollection(
+                Vc[Fc], facecolor="#d62728", edgecolor="none", alpha=0.16))
+        if Vt is not None:
+            ax.add_collection3d(Poly3DCollection(
+                Vt[Ft], facecolor="#1f77b4", edgecolor="none", alpha=0.55))
+    else:
+        # clean illustration: smooth, light-shaded analytic spheres for a solid
+        # 3D look. Conformal shells (translucent red) enclose the true safety
+        # balls (solid blue); each predicted center carries a conformal shell.
+        ls = LightSource(azdeg=315, altdeg=50)
+        for c in sel["pred"]:
+            shaded_sphere(ax, c, safe_rad + U_show, "#e23b3b", 0.22, ls)
+        for c in sel["gt"]:
+            shaded_sphere(ax, c, safe_rad, "#1f6fc4", 0.98, ls)
 
     # obstacle centers
     if sel["gt"].size:
@@ -293,17 +326,14 @@ def render(P: dict, sel: dict, out: str, elev: float, azim: float,
         ax.scatter(*sel["robot"], c="#2ca02c", s=36, marker="^",
                    depthshade=False, zorder=6)
 
-    # cosmetics
+    # cosmetics: clean, paper-style floating view (no grid, ticks, numbers, panes)
     ax.set_xlim(lo[0], hi[0]); ax.set_ylim(lo[1], hi[1]); ax.set_zlim(lo[2], hi[2])
     try:
         ax.set_box_aspect((hi - lo))
     except Exception:
         pass
     ax.view_init(elev=elev, azim=azim)
-    ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_zlabel("z")
-    ax.xaxis.pane.set_alpha(0.04); ax.yaxis.pane.set_alpha(0.04)
-    ax.zaxis.pane.set_alpha(0.04)
-    ax.grid(True, alpha=0.25)
+    ax.set_axis_off()
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     handles = [
@@ -334,13 +364,20 @@ def main():
     ap.add_argument("--i-view", type=int, default=4)
     ap.add_argument("--reuse", action="store_true",
                     help="render from the cached rollout (no recompute)")
-    ap.add_argument("--max-obs", type=int, default=2)
-    ap.add_argument("--sel-radius", type=float, default=1.6)
-    ap.add_argument("--elev", type=float, default=18.0)
-    ap.add_argument("--azim", type=float, default=-60.0)
+    ap.add_argument("--max-obs", type=int, default=1)
+    ap.add_argument("--sel-radius", type=float, default=1.3)
+    ap.add_argument("--min-clearance", type=float, default=0.62,
+                    help="pick the obstacle the whole path stays at least this far "
+                         "from, so the path visibly skirts (not penetrates) the bound")
+    ap.add_argument("--elev", type=float, default=45.0)
+    ap.add_argument("--azim", type=float, default=235.0,
+                    help="view ~perpendicular to the path/obstacle plane so the "
+                         "clearance is visible in-image, not along the line of sight")
     ap.add_argument("--res", type=int, default=72)
     ap.add_argument("--usetex", action="store_true")
     ap.add_argument("--envelope-mode", choices=["sphere", "field"], default="sphere")
+    ap.add_argument("--margin", type=float, default=0.13,
+                    help="conformal-envelope margin floor (radius = r_safe + margin)")
     ap.add_argument("--out", default=OUT)
     args = ap.parse_args()
 
@@ -352,11 +389,12 @@ def main():
         P = run_rollout(args.seed, args.n_obs, args.i_view)
 
     sel = pick_frame_and_obstacles(P, max_obs=args.max_obs,
-                                   sel_radius=args.sel_radius)
+                                   sel_radius=args.sel_radius,
+                                   min_clearance=args.min_clearance)
     print(f"[select] frame={sel['frame']} iv={sel['iv']} "
           f"n_true={sel['gt'].shape[0]} n_pred={sel['pred'].shape[0]}")
     render(P, sel, args.out, args.elev, args.azim, args.usetex, args.res,
-           envelope_mode=args.envelope_mode)
+           envelope_mode=args.envelope_mode, margin_floor=args.margin)
 
 
 if __name__ == "__main__":
