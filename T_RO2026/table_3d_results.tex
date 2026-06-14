@@ -1,0 +1,41 @@
+\begin{tabular}{lcccc}
+\hline
+Method &
+Collision rate $\downarrow$ &
+Infeasible rate $\downarrow$ &
+Steps to goal $\downarrow$ &
+Ctrl.\ time (ms) $\downarrow$ \\
+\hline
+
+Nominal MPC
+& 0.052
+& 0.044
+& \textbf{74.8}
+& 311.2 \\
+
+ACP-MPC~\cite{dixit2023adaptive}
+& \textbf{0.008}
+& 0.020
+& timeout
+& 479.9 \\
+
+CC-MPC~\cite{lekeufack2024decision}
+& 0.028
+& \textbf{0.000}
+& timeout
+& \textbf{82.8} \\
+
+ECP-MPC~\cite{shin2025egocentric}
+& 0.016
+& 0.027
+& timeout (crashed)
+& 10600.0 \\
+
+FCP-MPC (ours)
+& 0.020
+& 0.069
+& 83.8
+& 164.8 \\
+
+\hline
+\end{tabular}
