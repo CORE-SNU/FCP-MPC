@@ -49,17 +49,23 @@ METRIC_DIR = os.path.join(HERE, "metric_3d")
 TABLE_CSV = os.path.join(METRIC_DIR, "results_3d.csv")
 TABLE_JSON = os.path.join(METRIC_DIR, "results_3d.json")
 SCAL_CSV = os.path.join(METRIC_DIR, "scalability_3d.csv")
+TABLE_TEX = os.path.join(PAPER_DIR, "table_3d_results.tex")
 CACHE = os.path.join(PAPER_DIR, "results_3d_cache.pkl")
+
+# Row order and citation keys for the paper table (\input{table_3d_results.tex}).
+TABLE_ORDER = ["ACP-MPC", "CC-MPC", "ECP-MPC", "FCP-MPC (ours)"]
+TABLE_CITE = {
+    "ACP-MPC": r"~\cite{dixit2023adaptive}",
+    "CC-MPC": r"~\cite{lekeufack2024decision}",
+    "ECP-MPC": r"~\cite{shin2025egocentric}",
+    "FCP-MPC (ours)": "",
+}
 TRAJ_OUT = os.path.join(PAPER_DIR, "traj_3d_seeds.png")
 SCAL_OUT = os.path.join(PAPER_DIR, "control_time_3d.png")
 
 # label -> (run_fn, extras); reuse the exact method configs from make_figs_3d
 METHOD_MAP = {m[0]: (m[1], m[2]) for m in METHODS}
 METHOD_LABELS = [m[0] for m in METHODS]
-# Nominal MPC (no conformal calibration) -- included in table/scalability only;
-# make_figure iterates make_figs_3d.METHODS (4) so it is excluded from Fig.6.
-METHOD_MAP["Nominal MPC"] = (run_fcp, {"CP": False, "n_calib_samples": 0, "break_on_collision": True})
-METHOD_LABELS.append("Nominal MPC")
 
 
 # ----------------------------------------------------------------------------- metrics
@@ -228,6 +234,84 @@ def write_table(outcome_results, clean_ctrl, seeds):
                        "sequential single-thread pass (contention-free)"},
               open(TABLE_JSON, "w"), indent=2)
     print(f"[saved] table -> {TABLE_CSV} , {TABLE_JSON}")
+    write_latex_table(outcome_results, clean_ctrl)
+
+
+def _steps_cell(rs, max_steps):
+    """Steps-to-goal cell: numeric mean over episodes that reached the goal, or a
+    qualitative label ('timeout'/'crashed') when no seed reached it. Returns
+    (text, numeric_value_or_None) so callers can bold the best numeric entry.
+
+    Crash vs.\ timeout is derived from the (deterministic) step count, not the
+    cached ``status`` field: the parallel outcome pass measures loop time under CPU
+    contention and so tags every episode ``compute_fail``, whereas an episode that
+    ran the full ``max_steps`` horizon timed out and a shorter one crashed (early
+    break_on_collision / floor contact)."""
+    reached = [m for m in rs if m["reached_goal"]]
+    if reached:
+        v = float(np.mean([m["steps"] for m in reached]))
+        return f"{v:.1f}", v
+    n_timeout = sum(1 for m in rs if m["steps"] >= max_steps)
+    return ("timeout" if n_timeout * 2 >= len(rs) else "crashed"), None
+
+
+def write_latex_table(outcome_results, clean_ctrl):
+    """Emit T_RO2026/table_3d_results.tex (the tabular body \\input by main.tex), so
+    the paper table is generated from the same run as the figures rather than typed
+    by hand. Bold marks the best (min) infeasible rate, steps-to-goal and control
+    time; collision rate is left unbolded (a low rate paired with a crash/timeout is
+    not a success)."""
+    # the timeout cap = the largest step count any episode reached
+    max_steps = max((r["metrics"]["steps"] for r in outcome_results), default=0)
+    rows = {}
+    for label in TABLE_ORDER:
+        rs = [r["metrics"] for r in outcome_results if r["label"] == label]
+        if not rs:
+            continue
+        ct = clean_ctrl.get(label, {})
+        steps_str, steps_val = _steps_cell(rs, max_steps)
+        rows[label] = dict(
+            coll=float(np.mean([m["collision_rate"] for m in rs])),
+            infeas=float(np.mean([m["infeas_rate"] for m in rs])),
+            ctrl=ct.get("ctrl_mean_ms", float("nan")),
+            steps_str=steps_str, steps_val=steps_val,
+        )
+
+    def _best(key):
+        vals = {k: v[key] for k, v in rows.items()
+                if v.get(key) is not None and not np.isnan(v[key])}
+        return min(vals, key=vals.get) if vals else None
+
+    best_infeas, best_ctrl = _best("infeas"), _best("ctrl")
+    best_steps = _best("steps_val")
+
+    def _f(label, key, fmt, is_best):
+        v = rows[label][key]
+        s = fmt.format(v)
+        return rf"\textbf{{{s}}}" if is_best else s
+
+    lines = [r"\begin{tabular}{lcccc}", r"\hline",
+             "Method &", r"Collision rate $\downarrow$ &",
+             r"Infeasible rate $\downarrow$ &", r"Steps to goal $\downarrow$ &",
+             r"Ctrl.\ time (ms) $\downarrow$ \\", r"\hline"]
+    for label in TABLE_ORDER:
+        if label not in rows:
+            continue
+        r = rows[label]
+        steps = (rf"\textbf{{{r['steps_str']}}}" if label == best_steps
+                 else r["steps_str"])
+        lines += [
+            f"{label}{TABLE_CITE.get(label, '')}",
+            f"& {_f(label, 'coll', '{:.3f}', False)}",
+            f"& {_f(label, 'infeas', '{:.3f}', label == best_infeas)}",
+            f"& {steps}",
+            rf"& {_f(label, 'ctrl', '{:.1f}', label == best_ctrl)} \\",
+        ]
+    lines += [r"\hline", r"\end{tabular}"]
+    os.makedirs(PAPER_DIR, exist_ok=True)
+    with open(TABLE_TEX, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"[saved] paper table -> {TABLE_TEX}")
 
 
 def write_scalability(results_all):
@@ -251,8 +335,15 @@ def render_traj(results_main, seeds_for_fig):
         if not rs:
             continue
         trajs = {r["label"]: r["traj"] for r in rs if r["traj"] is not None}
+        crashed = {}
+        for r in rs:
+            tr = r["traj"]
+            crashed[r["label"]] = bool(
+                (not r["metrics"].get("reached_goal", 0))
+                and tr is not None and len(tr) > 0 and float(tr[-1][2]) <= 0.15)
         ref = rs[0]
-        data[seed] = dict(start=ref["start"], goal=ref["goal"], obs=ref["obs"], trajs=trajs)
+        data[seed] = dict(start=ref["start"], goal=ref["goal"], obs=ref["obs"],
+                          trajs=trajs, crashed=crashed)
     make_figure(data, TRAJ_OUT)
 
 

@@ -160,12 +160,16 @@ def make_figure(data: dict, out_path: str) -> None:
             ax.scatter(obs[:, 0], obs[:, 1], obs[:, 2],
                        c="0.7", s=4, alpha=0.12, depthshade=False, zorder=0)
 
+        crashed = d.get("crashed", {})
         for name, _fn, _ex, color, lw, z in METHODS:
             traj = d["trajs"].get(name)
             if traj is None or len(traj) < 2:
                 continue
             ax.plot(traj[:, 0], traj[:, 1], traj[:, 2],
                     color=color, lw=lw, alpha=0.95, zorder=z)
+            if crashed.get(name):  # lost control / fell to the floor -> mark the crash point
+                ax.scatter(*traj[-1], c="#d62728", marker="x", s=55,
+                           linewidths=2.0, depthshade=False, zorder=9)
 
         # start marker at where the trajectories actually begin (matches the former
         # overlay figure), not the env's nominal start pose which can differ slightly
@@ -204,8 +208,10 @@ def make_figure(data: dict, out_path: str) -> None:
                markersize=8, label="start"),
         Line2D([0], [0], marker="*", color="none", markerfacecolor="#111111",
                markersize=12, label="goal"),
+        Line2D([0], [0], marker="x", color="#d62728", linestyle="none",
+               markersize=8, markeredgewidth=2.0, label="crash"),
     ]
-    labels += ["start", "goal"]
+    labels += ["start", "goal", "crash"]
     fig.legend(handles, labels, loc="lower center", ncol=len(handles),
                fontsize=9, frameon=False, bbox_to_anchor=(0.5, -0.02),
                columnspacing=1.3, handletextpad=0.5)

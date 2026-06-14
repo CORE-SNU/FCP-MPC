@@ -447,6 +447,8 @@ def run_one_episode_visual_3d(
     traj_img_path: str = "traj_3d/fcp.png",
     method_name: str = "FCP-MPC",
     break_on_collision: bool = False,
+    capture_history: bool = False,
+    return_fields: bool = False,
 ):
     safe_rad = ROBOT_RAD + OBSTACLE_RAD
 
@@ -531,7 +533,7 @@ def run_one_episode_visual_3d(
     obs = env.reset()
     goal = np.asarray(obs.get("goal_xyz", [0, 0, 0]), dtype=np.float32).reshape(3,)
 
-    episode_history: List[Dict] = [] if visualize else None
+    episode_history: List[Dict] = [] if (visualize or capture_history) else None
     timing = {"ctrl_ms": [], "step_ms": [], "loop_ms": []}
     vx_global, vy_global, vz_global, yaw_rate = 0.0, 0.0, 0.0, 0.0
 
@@ -609,7 +611,7 @@ def run_one_episode_visual_3d(
         timing["step_ms"].append(step_ms)
         timing["loop_ms"].append(loop_ms)
 
-        if visualize:
+        if visualize or capture_history:
 
             episode_history.append(
                 {
@@ -697,7 +699,7 @@ def run_one_episode_visual_3d(
         if saved:
             print(f"[traj-img] saved {saved}")
 
-    return {
+    out = {
         "reached_goal": bool(reached_goal),
         "steps": int(total_frames),
         "collisions": int(n_collisions),
@@ -706,6 +708,21 @@ def run_one_episode_visual_3d(
         "loop_times_ms": list(timing["loop_ms"]),
         "robot_traj": robot_traj_arr.tolist(),
     }
+    if return_fields:
+        # Extra payload for offline figure generation (e.g. the Fig.4 conformal
+        # safety-bound illustration). Only populated on demand; the controller loop
+        # and metrics above are unaffected.
+        out["fields"] = {
+            "episode_history": episode_history,
+            "g_upper_grid": g_upper_grid,
+            "xs": xs, "ys": ys, "zs": zs,
+            "X": X, "Y": Y, "Z": Z,
+            "safe_rad": float(safe_rad),
+            "goal": np.asarray(goal, dtype=np.float32),
+            "robot_rad": float(ROBOT_RAD),
+            "obstacle_rad": float(OBSTACLE_RAD),
+        }
+    return out
 
 
 if __name__ == "__main__":

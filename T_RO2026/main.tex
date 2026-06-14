@@ -1260,18 +1260,18 @@ of online computation and stays well below the cost of ECP-MPC.
 
 \begin{figure}[!t]
   \centering
-  \includegraphics[width=\columnwidth]{Func_cp_3d.png}\\[3pt]
   \includegraphics[width=\columnwidth]{Func_cp_3d_zoom.png}
-  \caption{Qualitative behavior of FCP-MPC in a dense 3D environment.
-  \textbf{Top:} Global view of the environment, where green spheres denote dynamic
-  obstacles and the magenta curve shows the executed robot trajectory.
-  \textbf{Bottom:} Close-up view near the safety boundary.
-  Blue regions indicate the true danger (unsafe) field induced by obstacle
-  dynamics (used only for evaluation), while red translucent regions correspond
-  to the conformal unsafe region obtained via functional conformal calibration.
-  The trajectory progresses through regions certified as safe by the
-  fieldwise-calibrated conformal bound, avoiding unnecessary detours while
-  respecting worst-case safety constraints.}
+  \caption{The conformal safety bound in 3D, zoomed onto a single obstacle (the
+  3D analogue of the 2D illustration in Fig.~\ref{fig:sdf_visualization_2d}).
+  The solid blue surface is the \emph{true} safety boundary
+  $D_{t+i}(x)=r_{\mathrm{safe}}$ around the actual obstacle (used only for
+  evaluation); the translucent red surface is the \emph{conformal lower-bound}
+  boundary $\underline{D}_{t+i\mid t}(x)=r_{\mathrm{safe}}$ obtained from the
+  functional calibration, i.e.\ the nominal safety region around the predicted
+  center ($\times$) inflated by the calibrated margin. The conformal surface
+  encloses the true one, certifying coverage, and the executed FCP-MPC path
+  (green) threads just outside it---progressing efficiently while respecting the
+  worst-case safety constraint.}
   \label{fig:fcp_3d}
 \end{figure}
 
@@ -1299,26 +1299,29 @@ $250$-step time budget (timeout) in all seeds.
 
 
 ECP-MPC is dominated by its online cost. Its exhaustive, per-step conformal evaluation
-drives the control time to several seconds per planning step (over $5{,}000$~ms at
-$M{=}280$; Fig.~\ref{fig:scalability_3d}), far beyond the real-time budget. The quadrotor
-therefore loses control authority almost immediately and crashes within a handful of
-steps; its near-zero collision count merely reflects that it never traverses the field.
+drives the control time to nearly one second per planning step ($977$~ms at
+$M{=}280$; Fig.~\ref{fig:scalability_3d})---roughly an order of magnitude beyond the
+real-time budget. The quadrotor therefore loses control authority almost immediately and
+crashes within a handful of steps (about $16$ on average); its zero collision count merely
+reflects that it never traverses the field.
 
 In contrast, FCP-MPC is the only controller that reaches the goal in this dense regime,
-succeeding on $60\%$ of the seeds while running comfortably in real time ($51$~ms per
-step). Its collision rate of $0.092$ is not a safety failure but a direct reflection of the
-calibration: it matches the prescribed target miscoverage level $\alpha=0.10$, exactly as
-the conformal guarantee dictates. The baselines record lower collision counts only because
-they stall or crash before ever traversing the obstacle field, whereas FCP-MPC actively
-threads through it.
+succeeding on $60\%$ of the seeds while running comfortably in real time ($31.8$~ms per
+step). Crucially, it does so safely: its collision rate of $0.013$ stays well below the
+prescribed target miscoverage level $\alpha=0.10$ and below the collision rates of the
+real-time baselines (CC-MPC $0.016$, ACP-MPC $0.025$). ECP-MPC records zero collisions only
+because it stalls before ever entering the obstacle field, whereas FCP-MPC actively threads
+through it while keeping the realized risk under the calibrated bound. The price of enforcing
+the worst-case envelope as a hard constraint is a non-zero infeasible rate ($0.319$), a
+conservativeness we revisit in the Discussion.
 Figure~\ref{fig:fcp_3d} provides a qualitative illustration of this
 behavior in a dense 3D environment, showing that the controller progresses
 smoothly toward the goal without unnecessary detours, even in the presence of
 many nearby obstacles.
 Figure~\ref{fig:traj_3d} compares the closed-loop trajectories of all four
 controllers across three random seeds (panels~(a)--(c)) in the same
-$M{=}280$-obstacle environment, illustrating how FCP-MPC progresses toward the
-goal through the dense obstacle field.
+$M{=}280$-obstacle environment: FCP-MPC threads toward the goal while the
+baselines stall or fall (marked by a red~$\times$) early in the field.
 
 \begin{figure*}[!t]
   \centering
@@ -1327,8 +1330,10 @@ goal through the dense obstacle field.
   ($M{=}280$ dynamic obstacles) across three random seeds, shown in
   panels~(a)--(c). Each panel overlays all four controllers---CC-MPC (gray),
   ECP-MPC (orange), ACP-MPC (purple), and FCP-MPC (ours, blue). Green square:
-  start; black star: goal; gray points: obstacles. FCP-MPC makes consistent
-  progress toward the goal across seeds despite the heavy obstacle density.}
+  start; black star: goal; a red~$\times$ marks where a controller lost control
+  and fell to the floor. FCP-MPC is the only method that makes consistent
+  progress to the goal across seeds, while the baselines stall or crash early in
+  the dense field.}
   \label{fig:traj_3d}
 \end{figure*}
 
@@ -1358,11 +1363,14 @@ Figure~\ref{fig:scalability_3d} reports the mean control time per planning step
 under increasingly dense 3D environments, with the number of obstacles ranging
 from $N_{\mathrm{obs}} = 10$ to $280$.
 
-ECP-MPC exhibits a sharp growth in runtime as obstacle density increases,
-reflecting the need for repeated pointwise conformal evaluations and online
-aggregation of safety constraints across obstacles and horizon steps.
-In contrast, FCP-MPC scales significantly more favorably, maintaining
-near-linear growth in computation time despite the high-dimensional workspace
+ECP-MPC is one to two orders of magnitude slower than every other method at all
+densities (hundreds to thousands of milliseconds per step versus tens of
+milliseconds), reflecting the need for repeated pointwise conformal evaluations and
+online aggregation of safety constraints across obstacles and horizon steps; it never
+meets the real-time budget.
+In contrast, FCP-MPC scales gracefully, maintaining
+near-linear growth in computation time (from $7$~ms at $N_{\mathrm{obs}}=10$ to
+$32$~ms at $N_{\mathrm{obs}}=280$) despite the high-dimensional workspace
 and dense obstacle configuration.
 This improvement stems from the fully offline functional calibration, which
 allows safety evaluation to be reduced to efficient fieldwise SDF queries at
@@ -1439,9 +1447,11 @@ therefore deploy only the \emph{offline hard} variant in 3D, omitting the online
 adaptation and soft shaping of the 2D study without sacrificing goal-reaching.
 This design allows FCP-MPC to maintain higher execution speed than ECP-MPC while
 retaining awareness of environmental uncertainty beyond local interactions.
-Moreover, the observed collision rate of FCP-MPC is close to the target
-miscoverage level $\alpha = 0.05$, which is consistent with the intended
-calibration behavior of the conformal lower-bound SDF.
+Moreover, the observed collision rate of FCP-MPC ($0.013$) stays well within the
+target miscoverage level $\alpha = 0.10$, consistent with the intended
+calibration behavior of the conformal lower-bound SDF: the certified lower bound
+keeps the realized risk below the prescribed level even while the planner actively
+traverses the dense field.
 
 The use of worst-case conformal bounds inevitably introduces conservativeness,
 which leads to a non-zero infeasible rate when enforced as a hard constraint.

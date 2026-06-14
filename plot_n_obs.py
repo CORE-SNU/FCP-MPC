@@ -36,7 +36,8 @@ def main():
         "Nominal MPC":    ("#8c564b", "--", "D", 1.8, 5),
         "FCP-MPC (ours)": ("#1f77b4", "-",  "*", 2.8, 9),
     }
-    order = [m for m in ["CC-MPC", "ECP-MPC", "ACP-MPC", "Nominal MPC", "FCP-MPC (ours)"]
+    # Nominal MPC is shown in the table but excluded from the scalability plot.
+    order = [m for m in ["CC-MPC", "ECP-MPC", "ACP-MPC", "FCP-MPC (ours)"]
              if m in set(df['method_display'])]
     for m in order:
         sub = (df[df['method_display'] == m]
