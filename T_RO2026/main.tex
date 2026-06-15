@@ -658,6 +658,9 @@ p^{(k)}_{t+i|t}\in \mathcal S^{\mathrm{cp}}_{t+i|t},
 In implementation, the conformal lower bound can be incorporated in one of two ways: as a \emph{hard} feasibility filter that rejects any candidate violating~\eqref{eq:sampled_feasible_mpc} outright---the setting to which the guarantees of Theorems~\ref{thm:asymptotic_safety} and~\ref{thm:asymptotic_safety_afcp} apply---or as a \emph{soft} safety-shaping penalty added to the objective, which leaves the feasible set otherwise unconstrained by the dynamic conformal bound.
 The same calibrated field also admits a softer use: the conformal margin can enter the objective as a graded penalty instead of a hard cutoff, discouraging---rather than forbidding---incursions into the calibrated unsafe region. We compare both choices in our 2D pedestrian experiments.
 
+\subsection{Notes on Computational Complexity}\label{subsec:complexity}
+
+
 \subsection{Offline GMM Initialization}
 \label{subsec:offline_online_cp}
 
@@ -805,10 +808,9 @@ Algorithm~\ref{alg:fcp_mpc_acp} summarizes the resulting procedure.
     \STATE Cache the tuple $\Pi_i=(\{\varphi_{i,m}\}_{m=1}^{p_i},\hat{\xi}^{(0)}_i,\varepsilon_i)$;
 \ENDFOR
 \STATE Retain only the cached tuples $\{\Pi_i\}_{i=1}^N$; the GMM is not used online.
-\STATE \textbf{Online MPC loop:}
+\STATE \textbf{Online MPC loop(optional):}
 \FOR{$t=0,1,2,\dots$}
     \STATE Observe current robot state $z_t$ and obtain obstacle predictions $\{\widehat{\mathcal O}_{t+i|t}\}_{i=1}^N$;
-    \STATE \textit{(Online adaptation --- optional; omitted in the open 3D setting:)}
     \FOR{each horizon index $i$ for which an online residual field $S^{\mathrm{on}}_{i,t}$ becomes available}
         \STATE Project $S^{\mathrm{on}}_{i,t}$ onto the cached basis and compute $\xi^{\mathrm{on}}_{i,t}$;
         \STATE Update the coefficient upper bound $\hat{\xi}^{(t+1)}_i$ \eqref{eq:acp_update};
