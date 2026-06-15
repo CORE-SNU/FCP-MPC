@@ -813,10 +813,9 @@ Algorithm~\ref{alg:fcp_mpc_acp} summarizes the resulting procedure.
     \STATE Cache the tuple $\Pi_i=(\{\varphi_{i,m}\}_{m=1}^{p_i},\hat{\xi}^{(0)}_i,\varepsilon_i)$;
 \ENDFOR
 \STATE Retain only the cached tuples $\{\Pi_i\}_{i=1}^N$; the GMM is not used online.
-\STATE \textbf{Online MPC loop:}
+\STATE \textbf{Online MPC loop} (online adaptation optional):
 \FOR{$t=0,1,2,\dots$}
     \STATE Observe current robot state $z_t$ and obtain obstacle predictions $\{\widehat{\mathcal O}_{t+i|t}\}_{i=1}^N$;
-    \STATE \emph{Online adaptation (optional; skipped in 3D):}
     \FOR{each horizon index $i$ for which an online residual field $S^{\mathrm{on}}_{i,t}$ becomes available}
         \STATE Project $S^{\mathrm{on}}_{i,t}$ onto the cached basis and compute $\xi^{\mathrm{on}}_{i,t}$;
         \STATE Update the coefficient upper bound $\hat{\xi}^{(t+1)}_i$ \eqref{eq:acp_update};
