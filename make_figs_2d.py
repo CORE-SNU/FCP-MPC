@@ -54,11 +54,11 @@ TASK = {
 
 # (controller key, label, color, linewidth, linestyle, zorder). Ours is emphasized.
 METHODS = [
-    ("cc",                "CC-MPC",            "#7f7f7f", 1.6, "-",  2),
-    ("ecp-mpc",           "ECP-MPC",           "#ff7f0e", 1.6, "-",  2),
-    ("acp-mpc",           "ACP-MPC",           "#9467bd", 1.6, "-",  2),
-    ("fcp-hard-adaptive", "FCP-MPC (hard, ours)", "#08519c", 2.4, "--", 4),
-    ("fcp-soft-adaptive", "FCP-MPC (soft, ours)", "#1f77b4", 2.8, "-",  5),
+    ("cc",                "CC-MPC",            "#8c8c8c", 2.2, "-",  2),
+    ("ecp-mpc",           "ECP-MPC",           "#ff7f0e", 2.2, "-",  2),
+    ("acp-mpc",           "ACP-MPC",           "#9467bd", 2.2, "-",  2),
+    ("fcp-hard-adaptive", "FCP-MPC (hard, ours)", "#d62728", 3.2, "--", 4),
+    ("fcp-soft-adaptive", "FCP-MPC (soft, ours)", "#1f77b4", 3.4, "-",  5),
 ]
 
 
