@@ -1266,17 +1266,17 @@ of online computation and stays well below the cost of ECP-MPC.
 \begin{figure}[!t]
   \centering
   \includegraphics[width=\columnwidth]{Func_cp_3d_zoom.png}
-  \caption{The conformal safety bound in 3D, zoomed onto a single obstacle (the
-  3D analogue of the 2D illustration in Fig.~\ref{fig:sdf_visualization_2d}).
-  The solid blue surface is the \emph{true} safety boundary
+  \caption{True and conformal safety bounds in 3D, zoomed onto a single obstacle.
+  The solid blue ball is the \emph{true} safety boundary
   $D_{t+i}(x)=r_{\mathrm{safe}}$ around the actual obstacle (used only for
-  evaluation); the translucent red surface is the \emph{conformal lower-bound}
+  evaluation); the translucent red shell is the \emph{conformal lower-bound}
   boundary $\underline{D}_{t+i\mid t}(x)=r_{\mathrm{safe}}$ obtained from the
   functional calibration, i.e.\ the nominal safety region around the predicted
-  center ($\times$) inflated by the calibrated margin. The conformal surface
+  center inflated by the calibrated margin. The conformal surface
   encloses the true one, certifying coverage, and the executed FCP-MPC path
   (green) threads just outside it---progressing efficiently while respecting the
-  worst-case safety constraint.}
+  worst-case safety constraint. Faint gray spheres are other obstacles in the
+  scene.}
   \label{fig:fcp_3d}
 \end{figure}
 
@@ -1286,7 +1286,7 @@ of online computation and stays well below the cost of ECP-MPC.
 Table~\ref{tab:pybullet_results} reports averaged closed-loop results in a
 challenging scenario with $M=280$ dynamic obstacles and noisy
 predictions (prediction noise $0.20$, obstacle process noise $0.22$, oracle
-future noise $0.20$), evaluated over multiple random seeds.
+future noise $0.20$), evaluated over $17$ random seeds.
 
 ACP-MPC~\cite{dixit2023adaptive} adapts a scalar conformal radius online via ACI,
 but this pointwise-inflation approach becomes overly conservative in the dense 3D
@@ -1311,14 +1311,14 @@ crashes within a handful of steps (about $16$ on average); its zero collision co
 reflects that it never traverses the field.
 
 In contrast, FCP-MPC is the only controller that reaches the goal in this dense regime,
-succeeding on $60\%$ of the seeds while running comfortably in real time ($31.8$~ms per
-step). Crucially, it does so safely: its collision rate of $0.013$ stays well below the
-prescribed target miscoverage level $\alpha=0.10$ and below the collision rates of the
-real-time baselines (CC-MPC $0.016$, ACP-MPC $0.025$). ECP-MPC records zero collisions only
-because it stalls before ever entering the obstacle field, whereas FCP-MPC actively threads
-through it while keeping the realized risk under the calibrated bound. The price of enforcing
-the worst-case envelope as a hard constraint is a non-zero infeasible rate ($0.319$), a
-conservativeness we revisit in the Discussion.
+succeeding on $71\%$ of the $17$ seeds while running comfortably in real time ($31.8$~ms per
+step). Its collision rate of $0.070$ stays within the prescribed target miscoverage level
+$\alpha=0.10$, consistent with the conformal guarantee. The baselines record lower collision
+counts only because they stall or crash before ever traversing the obstacle field---their
+apparent safety is vacuous, since none of them reach the goal---whereas FCP-MPC actively
+threads through the dense field while keeping the realized risk under the calibrated bound.
+The price of enforcing the worst-case envelope as a hard constraint is a non-zero infeasible
+rate ($0.361$), a conservativeness we revisit in the Discussion.
 Figure~\ref{fig:fcp_3d} provides a qualitative illustration of this
 behavior in a dense 3D environment, showing that the controller progresses
 smoothly toward the goal without unnecessary detours, even in the presence of
@@ -1455,11 +1455,12 @@ offline calibration alone keeps per-step computation low while still certifying 
 conformal safety bound.
 This design allows FCP-MPC to maintain higher execution speed than ECP-MPC while
 retaining awareness of environmental uncertainty beyond local interactions.
-Moreover, the observed collision rate of FCP-MPC ($0.013$) stays well within the
+Moreover, the observed collision rate of FCP-MPC ($0.070$) stays within the
 target miscoverage level $\alpha = 0.10$, consistent with the intended
 calibration behavior of the conformal lower-bound SDF: the certified lower bound
 keeps the realized risk below the prescribed level even while the planner actively
-traverses the dense field.
+traverses the dense field---unlike the baselines, whose lower collision counts simply
+reflect that they never reach the goal.
 
 The use of worst-case conformal bounds inevitably introduces conservativeness,
 which leads to a non-zero infeasible rate when enforced as a hard constraint.

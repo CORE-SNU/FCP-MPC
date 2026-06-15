@@ -176,7 +176,14 @@ def pick_frame_and_obstacles(P: dict, max_obs: int = 2, sel_radius: float = 1.6,
     else:
         pred_sel = _near(pred_pts)
 
-    return dict(frame=k, iv=iv_c, robot=robot, gt=gt_sel, pred=pred_sel)
+    # a few nearby *other* obstacles, drawn faintly for 3D scene context
+    bg = np.zeros((0, 3), np.float32)
+    if gt_pts.size and gt_sel.size:
+        center = gt_sel.mean(axis=0)
+        d = np.linalg.norm(gt_pts - center[None, :], axis=1)
+        bg = gt_pts[[i for i in np.argsort(d) if 0.35 < d[i] <= 1.9][:3]]
+
+    return dict(frame=k, iv=iv_c, robot=robot, gt=gt_sel, pred=pred_sel, bg=bg)
 
 
 # --------------------------------------------------------------------------- #
@@ -242,7 +249,18 @@ def render(P: dict, sel: dict, out: str, elev: float, azim: float,
            usetex: bool, res: int, envelope_mode: str = "sphere",
            margin_floor: float = 0.20, margin_cap: float = 0.8):
     safe_rad = float(P["safe_rad"])
-    centers = np.vstack([c for c in (sel["gt"], sel["pred"]) if c.size] + [sel["robot"][None]])
+    main_centers = np.vstack([c for c in (sel["gt"], sel["pred"]) if c.size]
+                             + [sel["robot"][None]])
+    # include background obstacles that are reasonably close, so a couple peek into
+    # frame for 3D scene context without zooming too far out
+    bg = sel.get("bg", np.zeros((0, 3), np.float32))
+    if bg.size:
+        c0 = main_centers.mean(axis=0)
+        bg_close = bg[np.linalg.norm(bg - c0[None, :], axis=1) <= 1.45]
+        view_centers = np.vstack([main_centers, bg_close]) if bg_close.size else main_centers
+    else:
+        view_centers = main_centers
+    centers = main_centers  # the envelope grid stays tight on the main obstacle
     pad = safe_rad + 0.55   # zoom tight: just contain the inflated envelope
     lxs, lys, lzs, Xl, Yl, Zl = local_grid(centers, safe_rad, pad, res)
 
@@ -301,6 +319,10 @@ def render(P: dict, sel: dict, out: str, elev: float, azim: float,
         # 3D look. Conformal shells (translucent red) enclose the true safety
         # balls (solid blue); each predicted center carries a conformal shell.
         ls = LightSource(azdeg=315, altdeg=50)
+        # faint background obstacles for 3D scene context (drawn first / behind)
+        for c in bg:
+            shaded_sphere(ax, c, float(P.get("obstacle_rad", 0.2)),
+                          "#9aa3ad", 0.45, ls, n=32)
         for c in sel["pred"]:
             shaded_sphere(ax, c, safe_rad + U_show, "#e23b3b", 0.22, ls)
         for c in sel["gt"]:
@@ -316,7 +338,8 @@ def render(P: dict, sel: dict, out: str, elev: float, azim: float,
 
     # FCP path segment near the zoom box
     traj = P["robot_traj"]
-    lo = centers.min(axis=0) - pad; hi = centers.max(axis=0) + pad
+    vpad = safe_rad + 0.35
+    lo = view_centers.min(axis=0) - vpad; hi = view_centers.max(axis=0) + vpad
     inbox = np.all((traj >= lo[None]) & (traj <= hi[None]), axis=1)
     if inbox.any():
         # contiguous-ish: just plot the in-box points in order
@@ -326,14 +349,21 @@ def render(P: dict, sel: dict, out: str, elev: float, azim: float,
         ax.scatter(*sel["robot"], c="#2ca02c", s=36, marker="^",
                    depthshade=False, zorder=6)
 
-    # cosmetics: clean, paper-style floating view (no grid, ticks, numbers, panes)
+    # cosmetics: light 3D "room" -- tinted panes for depth, but no grid/ticks/numbers
     ax.set_xlim(lo[0], hi[0]); ax.set_ylim(lo[1], hi[1]); ax.set_zlim(lo[2], hi[2])
     try:
         ax.set_box_aspect((hi - lo))
     except Exception:
         pass
     ax.view_init(elev=elev, azim=azim)
-    ax.set_axis_off()
+    fig.patch.set_facecolor("white")
+    pane = (0.93, 0.95, 0.98, 1.0)   # very light blue-gray walls
+    for axc in (ax.xaxis, ax.yaxis, ax.zaxis):
+        axc.set_pane_color(pane)
+        axc.line.set_color((0.0, 0.0, 0.0, 0.0))
+        axc.set_ticks([])
+    ax.grid(False)
+    ax.set_xlabel(""); ax.set_ylabel(""); ax.set_zlabel("")
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     handles = [

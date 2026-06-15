@@ -1,13 +1,13 @@
 # Fdb version 4
-["bibtex main"] 1781458573.64768 "main.aux" "main.bbl" "main" 1781458575.02942 0
+["bibtex main"] 1781490593.42936 "main.aux" "main.bbl" "main" 1781490594.71482 0
   "./reference.bib" 1781450389.75051 10692 c272235919ba0b5f341e291af1bf719f ""
   "/usr/local/texlive/2025/texmf-dist/bibtex/bst/ieeetran/IEEEtran.bst" 1440712899 57748 7c8250ecf02814ce6ddc0cdbb63df1dd ""
-  "main.aux" 1781458574.76919 23596 3aa397eb0daeb6af235d8c563570330e "pdflatex"
+  "main.aux" 1781490594.5039 23518 0357448e2d0b886d5534c9697db88fb1 "pdflatex"
   (generated)
   "main.bbl"
   "main.blg"
   (rewritten before read)
-["pdflatex"] 1781458573.72521 "main.tex" "main.pdf" "main" 1781458575.02956 0
+["pdflatex"] 1781490593.50367 "main.tex" "main.pdf" "main" 1781490594.71495 0
   "/usr/local/texlive/2025/texmf-dist/fonts/enc/dvips/base/8r.enc" 1165713224 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
   "/usr/local/texlive/2025/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrr7t.tfm" 1136768653 960 379cc0019370a9e0208a0a3f949f847a ""
@@ -229,17 +229,17 @@
   "/usr/local/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map" 1751514603 5467155 19efa205003f9ecad95fbbaa6ff24da1 ""
   "/usr/local/texlive/2025/texmf-var/web2c/pdftex/pdflatex.fmt" 1751514593 3345733 83ac285274a808de895cb46e59599735 ""
   "/usr/local/texlive/2025/texmf.cnf" 1741450484 577 418a7058ec8e006d8704f60ecd22c938 ""
-  "Func_cp_3d_zoom.png" 1781458229.17173 135526 fdabf290acab686e85b75addfb59c11b ""
+  "Func_cp_3d_zoom.png" 1781490549.77681 185952 93ba36da9b18739b966ee743b462652d ""
   "IEEEtran.cls" 1781224172 282108 7379a03af5f3d0dad26db23a43c3a726 ""
   "control_time_3d.png" 1781455751.88845 89220 4b9325fe15f375b3871404ebb3fc212a ""
-  "main.aux" 1781458574.76919 23596 3aa397eb0daeb6af235d8c563570330e "pdflatex"
-  "main.bbl" 1781458573.72286 7440 8d8e12e56415a0f5841977024b1102ba "bibtex main"
-  "main.out" 1781458574.7702 5979 83a56edb424d2cba911502f6e9c993e7 "pdflatex"
-  "main.tex" 1781458558.17227 77252 c59e56aba21e79d7edccec743da76c98 ""
+  "main.aux" 1781490594.5039 23518 0357448e2d0b886d5534c9697db88fb1 "pdflatex"
+  "main.bbl" 1781490593.50123 7440 8d8e12e56415a0f5841977024b1102ba "bibtex main"
+  "main.out" 1781490594.50497 5979 83a56edb424d2cba911502f6e9c993e7 "pdflatex"
+  "main.tex" 1781490577.04004 77334 879bac711340a4ffd533b7b0aba57688 ""
   "multi_obs_H2.png" 1781224172 103040 f5acdbb4d39c21c0518c2e4490786301 ""
   "table_2d_ablation.tex" 1781269353.6846 1361 bfd54d9a71e5a8393c82e56304a87c2f ""
   "table_2d_results.tex" 1781269353.6837 1694 70247849cb1ed4603cc6805e2120b5e6 ""
-  "table_3d_results.tex" 1781455751.48987 478 e663f5701c1ca563e6430ab255d092bf ""
+  "table_3d_results.tex" 1781490314.76121 478 cb2be1ade81ab9bdbca5f41c6dcfe238 ""
   "traj_2d.png" 1781458525.20236 196985 3ce03d2db4037473d8354da0cd3ddfb1 ""
   "traj_3d_seeds.png" 1781458371.87203 172142 0aa9372675483b8d5a33010fc29300f6 ""
   (generated)
