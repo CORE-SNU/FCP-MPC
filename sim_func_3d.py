@@ -449,6 +449,8 @@ def run_one_episode_visual_3d(
     break_on_collision: bool = False,
     capture_history: bool = False,
     return_fields: bool = False,
+    safety_mode: str = "hard",
+    w_safety: float = 300.0,
 ):
     safe_rad = ROBOT_RAD + OBSTACLE_RAD
 
@@ -524,6 +526,8 @@ def run_one_episode_visual_3d(
         n_paths=n_paths,
         seed=0,
         CP=CP,
+        safety_mode=safety_mode,
+        w_safety=w_safety,
     )
 
     # ----------------------------

@@ -229,6 +229,8 @@ class FunctionalCPMPC3D:
         adaptive: bool = False,   # 3D uses a fully offline (hard) envelope; ample free space makes online adaptation unnecessary
         default_U: float = 1.0,
         endpoint_sigma: float = 1.0,
+        safety_mode: str = "hard",   # "hard": filter unsafe paths; "soft": penalize
+        w_safety: float = 300.0,     # soft-penalty weight on conformal-margin violation
     ):
         self.xs = np.asarray(xs, dtype=np.float32)
         self.ys = np.asarray(ys, dtype=np.float32)
@@ -257,6 +259,8 @@ class FunctionalCPMPC3D:
 
         self.default_U = float(default_U)
         self.endpoint_sigma = float(endpoint_sigma)
+        self.safety_mode = str(safety_mode)
+        self.w_safety = float(w_safety)
 
         self.params: Dict[int, CPStepParameters] = {}
         self.U_grid: Optional[np.ndarray] = None
@@ -597,6 +601,7 @@ class FunctionalCPMPC3D:
         boxes_3d: List[Any],
         pred_xyz: np.ndarray,
         pred_mask: np.ndarray,
+        dynamic: bool = True,
     ):
         P, T1, _ = paths.shape
         unsafe = np.zeros(P, dtype=bool)
@@ -611,6 +616,14 @@ class FunctionalCPMPC3D:
                     break
 
         # ---- (2) Dynamic safety (CP-buffer) ----
+        # In soft mode the dynamic conformal constraint is enforced as a scoring
+        # penalty instead of a hard filter, so only static (wall) safety is hard.
+        if not dynamic:
+            safe_mask = ~unsafe
+            if not np.any(safe_mask):
+                return None, None
+            return paths[safe_mask], vels[safe_mask]
+
         if pred_xyz is None or pred_mask is None:
             safe_mask = ~unsafe
             if not np.any(safe_mask):
@@ -652,7 +665,31 @@ class FunctionalCPMPC3D:
             return None, None
         return paths[safe_mask], vels[safe_mask]
 
-    def score_paths(self, paths: np.ndarray, vels: np.ndarray, goal_xyz: np.ndarray):
+    def soft_safety_penalty(self, paths: np.ndarray, pred_xyz, pred_mask):
+        """Per-path soft penalty: sum over the horizon of the squared conformal-margin
+        violation max(0, r_safe - (d_nom - U))^2. Mirrors the hard filter's geometry
+        but charges (rather than rejects) candidates entering the calibrated unsafe set."""
+        P = paths.shape[0]
+        pen = np.zeros(P, dtype=np.float32)
+        if pred_xyz is None or pred_mask is None:
+            return pen
+        T = min(paths.shape[1] - 1, int(pred_xyz.shape[0]))
+        for t in range(T):
+            mask_t = np.asarray(pred_mask[t], dtype=bool)
+            if not np.any(mask_t):
+                continue
+            obs_pts = np.asarray(pred_xyz[t], dtype=np.float32)[mask_t]
+            if obs_pts.shape[0] == 0:
+                continue
+            x_t = paths[:, t + 1, :].astype(np.float32, copy=False)
+            dists = np.min(np.linalg.norm(x_t[:, None, :] - obs_pts[None, :, :], axis=-1), axis=1)
+            U_vals = self.evaluate_U_batch(x_t, t) if self.CP else np.zeros(P, dtype=np.float32)
+            viol = np.maximum(0.0, self.safe_rad - (dists - U_vals))
+            pen += (viol * viol).astype(np.float32)
+        return pen
+
+    def score_paths(self, paths: np.ndarray, vels: np.ndarray, goal_xyz: np.ndarray,
+                    safety_pen: Optional[np.ndarray] = None):
         goal = np.asarray(goal_xyz, dtype=np.float32).reshape(3,)
 
         term_cost = self.weights.w_terminal * np.sum((paths[:, -1, :] - goal) ** 2, axis=-1)
@@ -660,6 +697,8 @@ class FunctionalCPMPC3D:
         ctrl_cost = self.weights.w_control * np.sum(vels ** 2, axis=(-1, -2))
 
         total_cost = term_cost + inter_cost + ctrl_cost
+        if safety_pen is not None:
+            total_cost = total_cost + self.w_safety * safety_pen
         best_idx = int(np.argmin(total_cost))
         return best_idx, float(total_cost[best_idx])
     
@@ -714,20 +753,20 @@ class FunctionalCPMPC3D:
         # 1) Generate
         paths, vels = self.generate_paths_trajectory(robot_xyz, float(robot_yaw), robot_vel, goal_xyz)
 
-        # 2) Filter
-        safe_paths, safe_vels = self.filter_unsafe_paths(paths, vels, boxes_3d, pred_xyz, pred_mask)
+        # 2) Filter (soft mode keeps only static/wall safety hard; dynamic -> penalty)
+        soft = (self.safety_mode == "soft")
+        safe_paths, safe_vels = self.filter_unsafe_paths(
+            paths, vels, boxes_3d, pred_xyz, pred_mask, dynamic=not soft)
         if safe_paths is None:
-            
             act, info_hold = self._hold_action(robot_xyz)
             info_hold["timing_ms"] = (time.perf_counter() - t0) * 1000.0
             info_hold["final_path"] = None
             return act, info_hold
-            
-            # return None, {"feasible": False, "final_path": None, "timing_ms": (time.perf_counter() - t0) * 1000.0}
 
-        
-        # 3) Score
-        best_idx, best_cost = self.score_paths(safe_paths, safe_vels, goal_xyz)
+        # 3) Score (soft: add conformal-margin penalty so the planner keeps moving
+        # while preferring safe paths, rather than stalling when all are unsafe)
+        pen = self.soft_safety_penalty(safe_paths, pred_xyz, pred_mask) if soft else None
+        best_idx, best_cost = self.score_paths(safe_paths, safe_vels, goal_xyz, safety_pen=pen)
 
         best_path = safe_paths[best_idx]
         best_vel_traj = safe_vels[best_idx]
