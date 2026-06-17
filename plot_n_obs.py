@@ -27,6 +27,10 @@ def main():
     short = {'acp': 'ACP-MPC', 'cc': 'CC-MPC', 'ecp': 'ECP-MPC',
              'fcp': 'FCP-MPC (ours)', 'nocp': 'Nominal MPC'}
     df['method_display'] = df['method'].map(lambda m: short.get(m, m))
+    # The 5-method driver emits "FCP-MPC (hard)"/"FCP-MPC (soft)". Show soft as the
+    # headline "FCP-MPC (ours)" line (consistent with the traj figure); hard is
+    # table-only. Without this remap FCP is dropped from the scalability plot entirely.
+    df['method_display'] = df['method_display'].replace({'FCP-MPC (soft)': 'FCP-MPC (ours)'})
 
     # colours/markers consistent with the trajectory figure (make_figs_3d); ours emphasized
     style = {

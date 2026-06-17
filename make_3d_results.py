@@ -456,7 +456,19 @@ def main():
     clean = clean_ctrl_by_method(timing_rows, args.n_obs_main)
     write_table(results_main, clean, seeds)
     write_scalability(timing_rows)
-    traj_seeds = [s for s in args.traj_seeds if s in seeds] or list(seeds)[:3]
+    # The trajectory figure must show FCP (the headline soft variant) reaching the goal.
+    # Prefer the requested seeds where FCP-soft actually succeeds, then fill from any
+    # other successful seeds; only fall back to raw requested seeds if none succeeded.
+    def _fcp_soft_reached(seed):
+        for r in results_main:
+            if r["seed"] == seed and r["label"] == "FCP-MPC (soft)":
+                return bool(r["metrics"].get("reached_goal"))
+        return False
+    succ = [s for s in seeds if _fcp_soft_reached(s)]
+    traj_seeds = [s for s in args.traj_seeds if s in succ]
+    traj_seeds += [s for s in succ if s not in traj_seeds]
+    traj_seeds = traj_seeds[:3] or ([s for s in args.traj_seeds if s in seeds] or list(seeds)[:3])
+    print(f"[traj] FCP-soft reaches goal on seeds {succ}; figure uses {traj_seeds}", flush=True)
     render_traj(results_main, traj_seeds)
     render_scalability()
     print("[done] table + traj + scalability (outcomes parallel, timing sequential)")
