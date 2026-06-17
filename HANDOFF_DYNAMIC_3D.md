@@ -107,6 +107,48 @@ section 1 (and the sparse table). Document whatever you find.
   low-sample/occlusion artifacts, and zara has no curve. The ETH-UCY overlay was **pulled
   from `main.tex`** — show the strong claim on SDD (fixed curved geometry) instead.
 
+### The argument this experiment must support (state this in the paper, then back EACH link with data)
+This is the justification for adopting the field-wise (functional) calibration formulation.
+It is a **causal chain, not one claim** — extract evidence for every link:
+
+> **(L1) uncertainty depends on FIXED spatial geometry**  ⟹  **(L2) the residual field is
+> therefore (approximately) time-invariant / stationary**  ⟹  **(L3) so the ensemble of
+> fields is low-rank / compressible**  ⟹  **(L4) so it can be calibrated OFFLINE once and
+> evaluated cheaply ONLINE** (the method's compute advantage).
+
+Key qualifier (must be shown, or the chain breaks): the dependence must be on **static
+scene geometry** (curve/entrance that never moves), NOT on transient state (instantaneous
+crowd config). That is exactly why SDD (fixed roads/buildings) is the right testbed, and
+why L1's hotspots must sit on fixed features.
+
+**What to extract per link (figures + numbers):**
+- **L1 — spatial dependence on fixed geometry.** Controlled `corr(error, turning)` clearing
+  the SUPPORTED gate (ρ≳0.35, ≥30 cells) + the overlay heatmap with top-uncertainty cells
+  marked, and note they coincide with FIXED scene features (the roundabout ring / lane
+  merges in `deathCircle`). Files: `sdd_<scene>_overlay.png`, `_diag.png`, the corr line.
+  Already produced by `analyze_spatial_uncertainty_ext.py`.
+- **L2 — time-invariance / stationarity (NEW; the linchpin).** Split the episodes (or the
+  time axis) into two disjoint halves; build the per-cell error field on each half
+  independently; show the two fields AGREE — scatter of cell means with a high Pearson r,
+  plus the two heatmaps side by side. High agreement ⟹ the field is a property of the fixed
+  scene, not of the moment. Doable from the per-window data in `sdd_*_cells.npz`
+  (`pos/err/turn_w/full`); add a small `--split-halves` mode or a short script.
+- **L3 — low-rank / learnable (NEW; the most direct justification).** FPCA on the residual
+  field across episodes → eigenvalue/scree decay (cumulative variance explained by the
+  first k components) + the leading eigenfunction φ₁(x) overlaid on the scene. Few
+  components capturing most variance ⟹ compressible ⟹ offline-learnable. Reuse
+  `sims/sim_func_cp.py::build_training_residuals_from_file` to get per-episode residual
+  grids, then PCA/FPCA. Figures: scree plot + φ₁ overlay.
+- **L4 — offline→online (already shown, no new run).** Cite the existing control-time
+  column + `control_time_3d.png` scalability: FCP's online per-step cost stays low while
+  per-path online calibration (ECP) blows up. This is the realized compute advantage that
+  L1–L3 justify.
+
+Mapping for the paper: L1 = intuitive/visual mechanism; **L2+L3 = the load-bearing
+evidence** that the field is stationary and low-dimensional (this is what
+`subsec:fcp-why`'s "S admits low-dimensional structure" actually needs); L4 = payoff.
+Lead with L1's picture, clinch with L2/L3, point to L4 for the win.
+
 ### Data location & git policy
 SDD lives in a top-level **`SDD/`** folder (annotations + reference images, ~455 MB
 unzipped). **`SDD/` is gitignored**; re-fetch per machine. Analysis **outputs are tracked**
