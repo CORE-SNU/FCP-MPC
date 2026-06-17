@@ -159,37 +159,68 @@ vs turning vs density) and the confound check `diagnose_spatial_uncertainty.py`
 - Per-cell stats + raw trajectories exported for re-analysis:
   `spatial_cells_{zara1,zara2,univ}.npz` (err/turn/count grids + raw futures).
 
-## TODO on desktop — show the strong claim on rounD / SDD (geometry-rich, fixed)
-Download there, then run the (already-written) `analyze_spatial_uncertainty_ext.py`.
+## TODO on desktop — SDD (the spatial-structure dataset)
+SDD is downloaded by hand (the only official link, vatic2, is down, and it is one ~69 GB
+zip; the desktop machine should fetch it — e.g. a Kaggle "Stanford Drone Dataset" mirror).
+You only need, per scene/video: `annotations.txt` (+ `reference.jpg`). `deathCircle` is a
+roundabout; `hyang`/`gates` are intersections — these have the fixed curved geometry that
+open ETH-UCY sidewalks lack.
 
-**SDD (free)** — pixel coords + reference.jpg; `deathCircle` IS a roundabout:
-- Get annotations + reference images: https://cvgl.stanford.edu/projects/uav_data/
-  Layout expected: `<data_dir>/annotations/<scene>/<video>/annotations.txt` (+ `reference.jpg`).
-- Run: `conda run -n cp python analyze_spatial_uncertainty_ext.py --dataset sdd \
-    --data-dir <SDD> --scene deathCircle --video video0`
-  (also try `--scene hyang`/`gates` for intersections.)
+**Just drop the data in the repo and let the analysis auto-find it.** Expected layout:
+`<repo>/sdd_data/annotations/<scene>/<video>/annotations.txt` (+ `reference.jpg`).
+(any `--data-dir` works; `sdd_data/` is the default suggestion.)
 
-**rounD (license-gated — download with your levelXdata account):**
-- https://levelxdata.com/round-dataset/  → `<data_dir>/<rec>_tracks.csv`,
-  `<rec>_recordingMeta.csv`, `<rec>_background.png`.
-- Run: `conda run -n cp python analyze_spatial_uncertainty_ext.py --dataset round \
-    --data-dir <rounD/data> --recording 00`
-- Vehicles curving on the roundabout give a strong, geometry-fixed turning signal with
-  full top-down coverage (little frame-edge truncation) — exactly what ETH-UCY lacked.
+### 1) Spatial-uncertainty analysis + control check (already hardened)
+`analyze_spatial_uncertainty_ext.py` already applies the controls ETH-UCY failed
+(full-length futures only, per-cell count ≥ NMIN, interior trim, density control,
+per-cell variance). It auto-finds all scenes if `--scene` is omitted, prints RAW vs
+CONTROLLED `corr(error,turning)`, a `SUPPORTED / WEAK` verdict, and saves
+`sdd_<scene>_<video>_{diag,overlay}.png` + `_cells.npz`.
 
-## Make the rounD/SDD figure reviewer-proof (apply BEFORE trusting it)
-`analyze_spatial_uncertainty_ext.py` currently does CV-residual ADE + grid + overlay.
-Harden it (these are methodological, not cosmetic):
-1. **Count-mask + interior/FOV trim** (drop low-sample + boundary cells); plot the
-   count map alongside.
-2. **Full-length futures only** (no truncated ADE).
-3. **Density control / per-capita** — show uncertainty is not just 1/visitation.
-4. **Use the score field, not ADE**: signed mean `S = D_pred − D_true` (systematic bias,
-   e.g. corner-cutting) and per-location across-episode variance (the real envelope
-   width). Cleanest evidence = **FPCA eigenfunction φ₁(x) + eigenvalue decay** of the
-   residual field (this is the object actually calibrated; reuse
-   `sims/sim_func_cp.py::build_training_residuals_from_file` →
-   `get_envelopes_value_and_function`).
+```bash
+conda run -n cp python analyze_spatial_uncertainty_ext.py --dataset sdd --data-dir sdd_data
+# or a single scene:
+conda run -n cp python analyze_spatial_uncertainty_ext.py --dataset sdd --data-dir sdd_data \
+    --scene deathCircle --video video0
+```
+Gate: only treat the spatial-structure claim as established if the **CONTROLLED** corr
+stays strong (verdict SUPPORTED, e.g. ρ ≳ 0.35 over ≥30 cells) — do NOT trust the RAW
+number. For the deepest evidence, also do signed score `S = D_pred − D_true` + per-location
+variance + FPCA eigenfunction φ₁(x)/eigenvalue decay on the residual field
+(reuse `sims/sim_func_cp.py::build_training_residuals_from_file` →
+`get_envelopes_value_and_function`); `_cells.npz` has the per-cell stats + raw tracks.
+
+### 2) Run the controllers (baselines + ours) on SDD as a navigation benchmark
+Goal: ETH-UCY + SDD both in the paper. Run CC / ACP-MPC / ECP-MPC / FCP (hard, soft) on
+SDD scenes and produce the same metrics (collision / infeasible / steps-to-goal /
+ctrl-time) as the 2D ETH-UCY table.
+- The 2D runner (`runner_2d.py`) consumes `predictions/<dataset>.pkl` with
+  `{prediction, history, future}` dicts (frame → pid → (H,2), world metres). **Write an
+  SDD adapter** that converts SDD tracks into that schema:
+  - build per-pedestrian trajectories (downsample to dt=0.4 s ≈ every 12 frames),
+  - 8-step history / 12-step future windows; `prediction` = a forecaster (reuse the same
+    predictor as ETH-UCY if available, else CV) so the comparison is apples-to-apples,
+  - SDD is in pixels → convert to metres if a scale is available, else keep consistent
+    units and set robot/obstacle radii accordingly,
+  - register scene start/goal + `eval_task_configs`/`scenarios` entries in `runner_2d.py`.
+- Then run, per SDD scene, the same controller sweep as ETH-UCY and regenerate the table
+  via `make_table_2d.py` (extend `DATASETS`), writing the `.tex` into **`T_RO2026/`**
+  (NOTE: `make_table_2d.py` currently writes only to `tables/`, which the paper does NOT
+  read — copy/point its output to `T_RO2026/`, see the 2D-table caveat below).
+- Save all produced metrics/trajectories (gitignored) and the figure/table.
+
+### 3) If results hold, update main.tex
+- Add an SDD subsection: the controlled spatial-uncertainty figure/table (only if verdict
+  SUPPORTED) as the *justification* for the functional bound, and the SDD navigation
+  results alongside the ETH-UCY table.
+- `\includegraphics`/`\input` from `T_RO2026/`; match the existing figure/table style.
+- Keep ETH-UCY as the standard 2D benchmark; SDD is the geometry-rich addition.
+
+### 2D-table propagation caveat (fix while here)
+`make_table_2d.py` writes `tables/table_2d_{results,ablation}.tex`, but the paper
+`\input`s the copies in `T_RO2026/`, which are currently STALE (old grid-baseline numbers,
+not the MPPI baselines). Point `make_table_2d.py` at `T_RO2026/` (or copy after running)
+so the paper reflects the MPPI-baseline 2D results.
 
 ## 3D framing (decided)
 - Air-lanes / drone crowd-control corridors are fixed → persistent spatial uncertainty →
