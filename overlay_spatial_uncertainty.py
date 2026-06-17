@@ -114,7 +114,10 @@ for ax, ds in zip(axes, SCENES):
     plt.colorbar(sm, ax=ax, fraction=0.046, pad=0.02, label="ADE (m)")
 
 fig.tight_layout()
-# Save into the paper folder so it is tracked (top-level *.png is gitignored).
-out = os.path.join(HERE, "T_RO2026", "spatial_uncertainty.png")
+# Exploratory preview only (gitignored). The ETH-UCY overlay is NOT a paper figure:
+# under count-mask + full-future + interior controls the turning signal halves and the
+# hot cells are boundary/low-sample artifacts (see diagnose_spatial_uncertainty.py).
+# The spatial-structure claim is to be shown on rounD / SDD-deathCircle instead.
+out = os.path.join(HERE, "spatial_uncertainty_overlay.png")
 fig.savefig(out, dpi=140, bbox_inches="tight")
 print(f"[saved] {out}")

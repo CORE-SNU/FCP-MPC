@@ -131,3 +131,73 @@ conda run -n cp python make_figs_2d.py
   online calibration, not a misconfiguration (sparse N_obs=50 → ~18 ms).
 - Experiment data (`metric*/`, `*.pkl/json/csv/npy`) is gitignored; only code and
   `T_RO2026/` assets (`*.tex`, `*.png`) are tracked.
+
+---
+
+# Spatial-uncertainty "why a functional spatial bound" figure — status + rounD/SDD handoff
+
+## Verdict on ETH-UCY (measured, not assumed)
+Goal: show prediction uncertainty is spatially structured (motivates the functional,
+space-dependent bound). Ran `analyze_spatial_uncertainty.py` (Trajectron++ ADE per cell
+vs turning vs density) and the confound check `diagnose_spatial_uncertainty.py`
+(full-length futures only + per-cell count ≥ 20 + interior trim):
+
+| scene | corr(err,turn) RAW → controlled | corr(err,density) controlled | err hi-dens vs lo-dens |
+|-------|--------------------------------|------------------------------|------------------------|
+| zara1 | +0.57 → **+0.32** | −0.38 | 0.41 vs 0.47 |
+| zara2 | +0.44 → **+0.15** | −0.64 | 0.37 vs 0.54 |
+| univ  | +0.66 → **+0.35** | −0.53 | 0.58 vs 0.71 |
+
+- **Weak claim holds**: the error field is spatially non-uniform AND uncertainty is
+  *not* visitation-density (it is anti-correlated; high-traffic corridors are the
+  lowest-error cells). This is enough for FCP's load-bearing premise.
+- **Strong claim (curve/decision-point → uncertainty) is NOT supported on ETH-UCY**:
+  the turning correlation roughly halves under controls (zara2 collapses to +0.15), the
+  raw hot cells sit on frame edges / next to parked cars & buildings (boundary +
+  low-sample + occlusion artifacts), and zara has no curve. **Pulled from `main.tex`**
+  (the ETH-UCY overlay is NOT a paper figure).
+- Per-cell stats + raw trajectories exported for re-analysis:
+  `spatial_cells_{zara1,zara2,univ}.npz` (err/turn/count grids + raw futures).
+
+## TODO on desktop — show the strong claim on rounD / SDD (geometry-rich, fixed)
+Download there, then run the (already-written) `analyze_spatial_uncertainty_ext.py`.
+
+**SDD (free)** — pixel coords + reference.jpg; `deathCircle` IS a roundabout:
+- Get annotations + reference images: https://cvgl.stanford.edu/projects/uav_data/
+  Layout expected: `<data_dir>/annotations/<scene>/<video>/annotations.txt` (+ `reference.jpg`).
+- Run: `conda run -n cp python analyze_spatial_uncertainty_ext.py --dataset sdd \
+    --data-dir <SDD> --scene deathCircle --video video0`
+  (also try `--scene hyang`/`gates` for intersections.)
+
+**rounD (license-gated — download with your levelXdata account):**
+- https://levelxdata.com/round-dataset/  → `<data_dir>/<rec>_tracks.csv`,
+  `<rec>_recordingMeta.csv`, `<rec>_background.png`.
+- Run: `conda run -n cp python analyze_spatial_uncertainty_ext.py --dataset round \
+    --data-dir <rounD/data> --recording 00`
+- Vehicles curving on the roundabout give a strong, geometry-fixed turning signal with
+  full top-down coverage (little frame-edge truncation) — exactly what ETH-UCY lacked.
+
+## Make the rounD/SDD figure reviewer-proof (apply BEFORE trusting it)
+`analyze_spatial_uncertainty_ext.py` currently does CV-residual ADE + grid + overlay.
+Harden it (these are methodological, not cosmetic):
+1. **Count-mask + interior/FOV trim** (drop low-sample + boundary cells); plot the
+   count map alongside.
+2. **Full-length futures only** (no truncated ADE).
+3. **Density control / per-capita** — show uncertainty is not just 1/visitation.
+4. **Use the score field, not ADE**: signed mean `S = D_pred − D_true` (systematic bias,
+   e.g. corner-cutting) and per-location across-episode variance (the real envelope
+   width). Cleanest evidence = **FPCA eigenfunction φ₁(x) + eigenvalue decay** of the
+   residual field (this is the object actually calibrated; reuse
+   `sims/sim_func_cp.py::build_training_residuals_from_file` →
+   `get_envelopes_value_and_function`).
+
+## 3D framing (decided)
+- Air-lanes / drone crowd-control corridors are fixed → persistent spatial uncertainty →
+  good fit. To DEMONSTRATE a 3D spatial map, make obstacles follow fixed corridors
+  (goal-directed crossers on fixed axes); otherwise keep 3D as the dynamic-control
+  efficacy result.
+
+## Scene videos for the ETH-UCY overlay (if needed)
+- `.avi` are gitignored (≈222 MB). Re-fetch on desktop: `bash assets/download_videos.sh`
+  (uses gdown). Homographies (`assets/homographies/*.txt`, image→world) ARE tracked.
+- Regenerate exploratory overlay: `conda run -n cp python overlay_spatial_uncertainty.py`.
