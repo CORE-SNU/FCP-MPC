@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Dynamic-env 3D run (per HANDOFF_DYNAMIC_3D.md). Held awake via systemd-inhibit.
+# Dynamic-env 3D re-run after the §1b fairness fixes (env RNG reset parity +
+# unified goal_finish_dist). Traj-seeds auto-selected by make_3d_results.
 set -uo pipefail
 cd /home/sju5379/cp_scratch
 LOG=/home/sju5379/cp_scratch/run_dynamic_3d.log
 : > "$LOG"
-
 echo "=== START $(date -Is) ===" | tee -a "$LOG"
 
-echo "--- [1/2] make_3d_results.py (dense table + traj + scalability) ---" | tee -a "$LOG"
+echo "--- [1/2] make_3d_results.py (fair env; auto traj-seeds) ---" | tee -a "$LOG"
 conda run --no-capture-output -n cp python make_3d_results.py \
-  --seeds 20 21 22 23 24 30 31 32 33 34 35 36 37 38 39 40 41 \
-  --traj-seeds 20 22 30 >> "$LOG" 2>&1
+  --seeds 20 21 22 23 24 30 31 32 33 34 35 36 37 38 39 40 41 >> "$LOG" 2>&1
 RC1=$?
 echo "--- make_3d_results.py exit=$RC1 $(date -Is) ---" | tee -a "$LOG"
 

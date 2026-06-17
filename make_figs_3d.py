@@ -69,6 +69,10 @@ EXP_BASE = dict(
     n_paths=2000,
     max_steps=250,
     n_calib_samples=20,
+    # Pinned so EVERY method uses the identical goal tolerance (fairness): without
+    # this, ACP/FCP fell back to their default 0.8 while CC/ECP used 0.3 (~2.7x
+    # closer), spuriously biasing the goal-reach comparison toward FCP.
+    goal_finish_dist=0.8,
     backend="loky",
     visualize=False,
     save_rrd=False,

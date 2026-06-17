@@ -128,7 +128,11 @@ class QuadWorldEnv3D(BaseAviary):
         # Control
         self.ctrl = DSLPIDControl(drone_model=DroneModel.CF2X)
         
-        # RNG
+        # RNG. Keep the base seed so reset() can reproduce the SAME obstacle field
+        # every episode regardless of how much RNG was consumed beforehand (e.g. FCP's
+        # offline calibration steps the env, which would otherwise advance self.rng and
+        # give FCP a different obstacle realization than the baselines at the same seed).
+        self._seed0 = seed
         self.rng = np.random.default_rng(seed)
         self.oracle_rng = np.random.default_rng(seed + 9999) # Separate stream for GT
         
@@ -345,7 +349,16 @@ class QuadWorldEnv3D(BaseAviary):
     def reset(self, seed=None, options=None):
         super().reset(seed, options)
         self.ctrl.reset()
-        
+
+        # Reseed deterministically so the obstacle field is identical for every method
+        # at a given seed (fairness): otherwise any RNG consumed before this reset
+        # (notably FCP's offline calibration rollouts) would shift the obstacle layout
+        # and trajectories, letting FCP fly a different scene than the baselines.
+        base = seed if seed is not None else self._seed0
+        self._seed0 = base
+        self.rng = np.random.default_rng(base)
+        self.oracle_rng = np.random.default_rng(base + 9999)
+
         # Set Drone Initial Position (Randomized within bounds or fixed safe area)
         start_pos = np.array([0.0, 0.0, 1.0]) # Default start
         p.resetBasePositionAndOrientation(self.DRONE_IDS[0], start_pos, [0,0,0,1])

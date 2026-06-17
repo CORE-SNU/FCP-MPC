@@ -11,6 +11,10 @@ import numpy as np
 # ----------------------------
 METRIC_DIR = "metric"          # runner_2d.py writes per-(dataset, controller) JSON here
 OUT_DIR = "tables"
+# The paper \inputs the 2D tables from T_RO2026/, so write there too — otherwise
+# tables/ holds the fresh (MPPI) numbers while the paper keeps stale ones. Writing
+# both keeps T_RO2026/ in lock-step with the regenerated tables/.
+PAPER_DIR = "T_RO2026"
 OUT_MAIN_TEX = "table_2d_results.tex"      # baselines vs FCP-MPC (our full / adaptive method)
 OUT_ABLATION_TEX = "table_2d_ablation.tex" # FCP-MPC internal ablation: online adaptation effect
 
@@ -290,17 +294,19 @@ def build_table():
     main_tex = build_main_table()
     ablation_tex = build_ablation_table()
 
-    main_path = os.path.join(OUT_DIR, OUT_MAIN_TEX)
-    with open(main_path, "w", encoding="utf-8") as f:
-        f.write(main_tex)
+    # Write the tables into both tables/ (reference) and T_RO2026/ (what the paper
+    # \inputs) so the two never desync.
+    out_dirs = [OUT_DIR, PAPER_DIR]
+    for d in out_dirs:
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, OUT_MAIN_TEX), "w", encoding="utf-8") as f:
+            f.write(main_tex)
+        with open(os.path.join(d, OUT_ABLATION_TEX), "w", encoding="utf-8") as f:
+            f.write(ablation_tex)
 
-    ablation_path = os.path.join(OUT_DIR, OUT_ABLATION_TEX)
-    with open(ablation_path, "w", encoding="utf-8") as f:
-        f.write(ablation_tex)
-
-    print(f"[saved] main results table  -> {main_path}")
+    print(f"[saved] main results table  -> {[os.path.join(d, OUT_MAIN_TEX) for d in out_dirs]}")
     print(main_tex)
-    print(f"\n[saved] ablation table      -> {ablation_path}")
+    print(f"\n[saved] ablation table      -> {[os.path.join(d, OUT_ABLATION_TEX) for d in out_dirs]}")
     print(ablation_tex)
 
 
