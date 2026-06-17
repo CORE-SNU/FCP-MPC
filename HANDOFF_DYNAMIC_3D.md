@@ -11,7 +11,7 @@ does). Conda env `cp` for everything. The dynamic-env 3D run itself is **done**
    (scalability-FCP and traj-FCP-success bugs are already fixed in code); verify + commit.
 3. **§2** SDD: ensure `SDD/` is present (re-download if missing) → run the hardened
    spatial-uncertainty analysis and check the CONTROLLED gate → if SUPPORTED, run the SDD
-   navigation benchmark → update `main.tex`.
+   navigation benchmark → update `main.tex`. write the code and execute it and save the figure and/or tables to be used in the paper.
 4. Fix the **2D-table propagation** caveat so the paper shows the MPPI 2D numbers.
 Each section below is self-contained with exact commands and what to verify/commit.
 
