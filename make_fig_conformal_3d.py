@@ -54,6 +54,9 @@ ENV_KWARGS = dict(
     pred_model_noise=0.20, obs_process_noise=0.22, gt_future_noise=0.20,
     mode_switch_p=0.95, mode_min_ttl=1, mode_max_ttl=6,
     turn_rate_std=3.0, stop_go_p=0.6, gui=False,
+    # Dynamic environment (paper's main setting): half the obstacles are crossing
+    # pedestrians that traverse the workspace toward goals; the rest random-walk.
+    goal_directed_frac=0.5,
 )
 
 
