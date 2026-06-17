@@ -166,20 +166,26 @@ You only need, per scene/video: `annotations.txt` (+ `reference.jpg`). `deathCir
 roundabout; `hyang`/`gates` are intersections — these have the fixed curved geometry that
 open ETH-UCY sidewalks lack.
 
-### Download (recommended: OpenTraj's SDD zip — cited, MIT, single file, no account)
-OpenTraj (Amirian et al., ACCV 2020; MIT) is the community-standard trajectory-benchmark
-toolkit. It ships loaders, not raw data, and points to a single SDD annotations zip
-(annotations + reference images; NOT the 69 GB videos):
+### Data location & git policy
+The SDD dataset lives in a top-level **`SDD/`** folder (annotations + reference images,
+already unzipped, ~455 MB). **`SDD/` is gitignored** (raw data, large) — re-fetch it on any
+machine, don't commit it. The analysis **OUTPUTS are tracked**: `sdd_*_overlay.png`,
+`sdd_*_diag.png`, `sdd_*_cells.npz` at the repo root (gitignore has explicit `!` exceptions),
+plus any final figure/table you put in `T_RO2026/`.
+
+### (Re)download if `SDD/` is missing (OpenTraj zip — cited, MIT, single file, no account)
+OpenTraj (Amirian et al., ACCV 2020; MIT) ships loaders, not raw data, and points to a
+single SDD annotations zip (annotations + reference images; NOT the 69 GB videos):
 ```bash
-mkdir -p sdd_data && cd sdd_data
+mkdir -p SDD && cd SDD
 curl -L "https://www.dropbox.com/s/v9jvt4ln7t42m6m/StanfordDroneDataset.zip?dl=1" -o sdd.zip
 unzip -q sdd.zip && rm sdd.zip && cd ..
 ```
-Unzips to the standard SDD layout (all 8 scenes incl. `deathCircle` roundabout,
-`hyang`/`gates` intersections; pixel coords; FPS 30). Our parser auto-finds it — no need
-to install the OpenTraj toolkit. Fallbacks: `git clone
-https://github.com/flclain/StanfordDroneDataset sdd_data` (smaller, unofficial, no
-license) or OpenTraj's own `opentraj/toolkit/loaders/loader_sdd.py`.
+Standard SDD layout (all 8 scenes incl. `deathCircle` roundabout, `hyang`/`gates`
+intersections; pixel coords; FPS 30). Our parser auto-finds it — no need to install the
+OpenTraj toolkit. Fallbacks: `git clone https://github.com/flclain/StanfordDroneDataset
+SDD` (smaller, unofficial, no license) or OpenTraj's own
+`opentraj/toolkit/loaders/loader_sdd.py`.
 
 Optional upgrade — **constrained-SDD** (april-tools; explicit polygon constraints for
 building/obstacle/offroad → correlate uncertainty with *distance-to-constraint*, a cleaner
@@ -196,7 +202,7 @@ small custom loader; treat as supplementary.
   *A Probabilistic Neuro-symbolic Layer for Algebraic Constraint Satisfaction*,
   arXiv:2503.19466 (2025) + the april-tools/constrained-sdd repo.
 
-**The analysis auto-finds the data.** Point `--data-dir` at `sdd_data`; it globs
+**The analysis auto-finds the data.** Point `--data-dir` at `SDD`; it globs
 `**/annotation*.txt` (works for both `annotation.txt` and `annotations.txt`, any nesting)
 and locates a nearby `reference.jpg/png`. After downloading, sanity-check: per-scene track
 counts plausible, coordinates within the reference-image size, reference image present.
@@ -209,9 +215,9 @@ CONTROLLED `corr(error,turning)`, a `SUPPORTED / WEAK` verdict, and saves
 `sdd_<scene>_<video>_{diag,overlay}.png` + `_cells.npz`.
 
 ```bash
-conda run -n cp python analyze_spatial_uncertainty_ext.py --dataset sdd --data-dir sdd_data
+conda run -n cp python analyze_spatial_uncertainty_ext.py --dataset sdd --data-dir SDD
 # or a single scene:
-conda run -n cp python analyze_spatial_uncertainty_ext.py --dataset sdd --data-dir sdd_data \
+conda run -n cp python analyze_spatial_uncertainty_ext.py --dataset sdd --data-dir SDD \
     --scene deathCircle --video video0
 ```
 Gate: only treat the spatial-structure claim as established if the **CONTROLLED** corr

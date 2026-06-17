@@ -29,3 +29,13 @@
 # overlay; track them (videos stay ignored -- re-fetch via assets/download_videos.sh).
 !assets/homographies/
 !assets/homographies/*.txt
+
+# Raw SDD dataset (downloaded, large) -- not tracked; re-fetch per HANDOFF.
+SDD/
+sdd_data/
+
+# ...but DO track the SDD analysis OUTPUTS (figures / per-cell result data) produced
+# by analyze_spatial_uncertainty_ext.py at the repo root.
+!sdd_*_overlay.png
+!sdd_*_diag.png
+!sdd_*_cells.npz
