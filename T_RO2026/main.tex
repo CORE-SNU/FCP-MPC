@@ -86,11 +86,30 @@ avoidance, signed distance fields, uncertainty quantification, safe navigation.
 
 \section{Introduction}
 % motivation
-efficient motion planning in uncertain environments with safety \& efficiency guarantees
+Autonomous robots are increasingly asked to operate in environments shared with pedestrians, vehicles, and other moving agents, where safe behavior depends on anticipating how the surrounding world will evolve. Because the future occupancy of such an environment is unobservable at planning time, it must be forecast from historical and contextual observations, and any motion planner that consumes these forecasts inherits their errors. The central difficulty is therefore not prediction or planning in isolation but the coupling of the two: a controller must account for the uncertainty in predicted obstacle motion tightly enough to remain safe, yet cheaply enough to close the loop in real time and in densely populated scenes. Achieving safety and efficiency simultaneously, with quantitative guarantees, is the problem we address.
+
+A large body of work embeds prediction uncertainty directly into the planning objective or constraints. Chance-constrained formulations bound the probability of collision~\cite{blackmore2011chance}, and risk-sensitive and distributionally robust planners hedge against tail events or worst-case obstacle distributions~\cite{hakobyan2019risk,fan2021step,hakobyan2021wasserstein}. These methods deliver strong guarantees, but they typically presuppose an explicit—often parametric or moment-based—model of the prediction error, and the associated worst-case machinery is frequently solved online, which becomes costly as scene density grows. Conformal prediction (CP)~\cite{vovk2005algorithmic,angelopoulos2023conformal,gibbs2021adaptive} has recently emerged as an attractive alternative, converting the raw errors of an arbitrary, black-box predictor into sets with finite-sample, distribution-free coverage, and has been applied to planning among dynamic agents~\cite{lindemann2023safeplanning,dixit2023adaptive}, to perception-based navigation~\cite{mei2025perceive}, and to decision-theoretic control under imperfect predictions~\cite{lekeufack2024decision,contreras2025safe}.
 
 
-% related works; to to be classified according to our contribution
-conformal prediction for safe motion planning~\cite{lindemann2023safeplanning, dixit2023adaptive,lekeufack2024decision,mei2025perceive,shin2025egocentric,contreras2025safe,sundarsingh2026safe}
+Despite their appeal, most existing CP approaches to motion planning share a common structural limitation: they conformalize a scalar score—a per-obstacle radius or a per-step margin—and recompute it pointwise online. The online cost then grows with the number of obstacles and the planning horizon, precisely the regime in which real-time safety matters most. Moreover, the worst-case score definitions that these formulations require in order to certify safety over a region rather than at a point become intractable to enforce exactly, and are consequently subjected to severe approximation in practice~\cite{mei2025perceive,sundarsingh2026safe}. What is conformalized is thus either cheap but spatially incoherent, or faithful but unaffordable online.
+
+
+Our point of departure is a representational one. Environmental geometries, and in particular the error of a predicted signed distance field (SDF), are not arbitrary high-dimensional objects: across a scene they are spatially structured and admit accurate low-dimensional representations. We verify this empirically on the ETH–UCY benchmark, where the residual SDF is approximately time-invariant and low-rank, with a handful of functional principal components capturing most of its variance. This structure suggests treating the prediction error as a function over the workspace rather than as a collection of scalars, and conformalizing the entire spatial field at once. Doing so yields a continuous, queryable safety envelope instead of a patchwork of pointwise inflations, and—crucially—its low-rank structure permits an offline–online decomposition that separates the expensive conformalization from real-time planning.
+
+
+Building on this insight, we introduce a functional conformal prediction (FCP) framework that produces a high-confidence lower bound of the predicted SDF at the level of the field. The residual SDF is expanded in a data-driven functional basis obtained by functional principal component analysis, and a Gaussian-mixture inductive conformal procedure in the resulting coefficient space yields a distribution-free upper envelope of the score, with a closed-form support function over a union of ellipsoids. An accurate envelope is fitted once, offline, from a large calibration set; online, it is refined by a lightweight adaptive functional conformal (AFCP) update that acts only on a low-dimensional coefficient vector—indeed, a single scalar per horizon index—so that per-step cost stays largely insensitive to obstacle count. We embed the conformalized lower-bound SDF as a tightened safety constraint within a sampling-based model predictive controller, and we prove asymptotic closed-loop safety both under exchangeability and, through the online adaptation, under distribution shift. Because the guarantee is certified over the entire field, it holds for any planned trajectory satisfying the tightened constraint, independent of how the control space is sampled.
+
+
+The contributions of this paper are as follows.
+\begin{itemize}
+    \item We formulate prediction-uncertainty quantification for safe planning as a functional conformal problem on the residual signed distance field, and construct a distribution-free, field-level lower bound that is continuous and queryable rather than pointwise.
+
+    \item We develop an offline–online decomposition in coefficient space: a GMM-based inductive conformal envelope is conformalized once offline, while online a low-dimensional adaptive update absorbs distribution shift, keeping per-step computation low and largely decoupled from obstacle count.
+
+    \item We embed the conformalized bound in a sampling-based MPC and establish asymptotic closed-loop safety under exchangeability (Theorem~\ref{thm:asymptotic_safety}) and under distribution shift via the online update (Theorem~\ref{thm:asymptotic_safety_afcp}), with the guarantee decoupled from the control-sampling scheme.
+
+    \item We demonstrate on the ETH–UCY pedestrian benchmarks and on a dense 3D quadrotor task with up to 280 dynamic obstacles that FCP-MPC attains a favorable balance of safety, feasibility, and efficiency, with its certified hard variant the only method to remain within the real-time budget in the densest 3D scenes.
+\end{itemize}
 
 
 
@@ -101,9 +120,6 @@ conformal prediction for safe motion planning~\cite{lindemann2023safeplanning, d
     \item recent worst-case definition of score functions for motion planning are intractable, thus requiring severe approximation in practice, e.g.~\cite{mei2025perceive,sundarsingh2026safe}.
 \end{itemize}
 
-\subsection{Notation}
-For $f, g \in L^2(\mathcal{X}, d\mathrm{x})$, we denote their inner product by $\langle f, g \rangle = \int_{\mathcal{X}} f(\mathrm{x})g(\mathrm{x}) d\mathrm{x}$.
-
 
 
 \section{Related Works}
@@ -112,36 +128,48 @@ For $f, g \in L^2(\mathcal{X}, d\mathrm{x})$, we denote their inner product by $
 Safe operation in dynamic environments has classically been decomposed into estimating the evolving occupancy of the world and planning against it. A large body of work tracks moving obstacles by coupling simultaneous localization and mapping with multi-object tracking~\cite{wang2007simultaneous,coue2006bayesian}, or by maintaining dynamic occupancy representations through particle-based grids~\cite{danescu2011modeling,tanzmeister2014grid} and random-finite-set filters~\cite{nuss2018random,chen2023continuous}. Among these, continuous particle-based occupancy mapping has been pushed to real-time dense settings~\cite{chen2023continuous}, reflecting a broader trend toward distance- and occupancy-aware spatial representations. In parallel, signed distance fields---learned~\cite{park2019deepsdf,ortiz2022isdf} or fused online from depth sensing~\cite{newcombe2011kinectfusion}---have become a favored geometric layer because of their smooth, queryable structure. Our formulation inherits this representational viewpoint: rather than reasoning over raw occupancy, we operate directly on the predicted signed distance field, and we further treat the prediction error of that field as the object to be quantified. On the forecasting side, learned trajectory predictors such as Trajectron++~\cite{salzmann2020trajectron} supply the multi-step obstacle motion that our planner consumes, and their residual errors are precisely what a safety layer must account for.
 
 \subsection{Risk-Aware Motion Planning}
-A complementary line of research embeds uncertainty directly into the planning objective or constraints. Chance-constrained formulations bound the probability of collision and have been studied extensively, from convex chance-constrained path planning with obstacles~\cite{} to probabilistic collision checking under explicit chance constraints~\cite{} and motion planning in dynamic, uncertain environments~\cite{}. Because exact verification of collision constraints against non-convex moving obstacles is generally intractable, these methods typically approximate the free space or the obstacle set, e.g., by unions of convex regions~\cite{}, or accept conservative encodings of the nonconvex feasible set~\cite{}. Risk-sensitive planners instead optimize coherent risk measures such as the conditional value-at-risk~\cite{}, and distributionally robust approaches hedge against the worst-case distribution within an ambiguity set; the distributionally robust risk map~\cite{}, for instance, certifies CVaR-type safety even when the obstacle motion distribution is only imperfectly learned. These methods deliver strong guarantees but generally require an explicit (often parametric or moment-based) model of the prediction uncertainty, and the worst-case machinery is frequently solved online, which can be costly in dense scenes. Our work targets the same safety semantics while pushing the expensive statistical computation offline and keeping only a lightweight coefficient-space update online.
+A complementary line of research embeds uncertainty directly into the planning objective or constraints. Chance-constrained formulations bound the probability of collision and have been studied extensively, from convex chance-constrained path planning with obstacles~\cite{blackmore2011chance} to probabilistic collision checking under explicit chance constraints~\cite{} and motion planning in dynamic, uncertain environments~\cite{du2011robot}. Because exact verification of collision constraints against non-convex moving obstacles is generally intractable, these methods typically approximate the free space or the obstacle set, e.g., by unions of convex regions~\cite{zhang2020optimization,deits2015computing}, or accept conservative encodings of the nonconvex feasible set~\cite{da2019collision}. Risk-sensitive planners instead optimize coherent risk measures such as the conditional value-at-risk~\cite{hakobyan2019risk,fan2021step}, and distributionally robust approaches hedge against the worst-case distribution within an ambiguity set; the distributionally robust risk map~\cite{hakobyan2022distributionally}, for instance, certifies CVaR-type safety even when the obstacle motion distribution is only imperfectly learned. These methods deliver strong guarantees but generally require an explicit (often parametric or moment-based) model of the prediction uncertainty, and the worst-case machinery is frequently solved online, which can be costly in dense scenes. Our work targets the same safety semantics while pushing the expensive statistical computation offline and keeping only a lightweight coefficient-space update online.
 
 
+\subsection{Conformal Prediction for Safe Planning and Navigation}
+Conformal prediction (CP) has recently emerged as a distribution-free route to provable safety, converting heuristic predictor errors into sets with finite-sample coverage. In robotics it has been applied to planning among dynamic agents~\cite{lindemann2023safeplanning,dixit2023adaptive}, to perception-based navigation with statistical assurances~\cite{mei2025perceive}, and to decision-theoretic and ensemble-based control under imperfect predictions~\cite{lekeufack2024decision,contreras2025safe}, with extensions to conformalized semantic maps~\cite{sundarsingh2026safe}. Adaptive conformal inference~\cite{gibbs2021adaptive} further relaxes the exchangeability requirement, sustaining long-run coverage under distribution shift, and underlies online conformal schemes for motion planning~\cite{dixit2023adaptive}. Most of these approaches, however, conformalize a scalar score—a per-obstacle radius or a per-step margin—and recompute it pointwise online, so the cost grows with the number of obstacles and the horizon, and worst-case score definitions become intractable to enforce exactly~\cite{mei2025perceive,sundarsingh2026safe}. In contrast, we adopt the functional CP perspective~\cite{lei2015conformal}, treating the residual signed distance field as an element of a function space and conformalizing the entire spatial field at once. This field-level view yields a continuous, queryable safety envelope rather than a collection of pointwise inflations, and its low-rank structure—made explicit through functional principal component analysis—admits an offline–online decomposition that decouples the statistical procedure from real-time planning.
+
+Most closely related is the egocentric conformal prediction (ECP) framework~\cite{shin2025egocentric}, our ECP-MPC baseline, which shares our premise of scoring how much closer obstacles are than predicted—rather than inflating a scalar radius—but attaches that score to each robot state and conformalizes it online. We instead conformalize the entire residual signed distance field as one functional object, making the guarantee~\eqref{eq:coverage-guarantee} hold uniformly. Furthermore, the expensive GMM-based conformalization is paid once offline while only a low-dimensional coefficient vector is adapted online (Section~\ref{subsec:online_update}), and per-step cost stays largely insensitive to obstacle count. As a result, safety is decoupled from the control-sampling scheme (Theorem~\ref{thm:asymptotic_safety} \&~\ref{thm:asymptotic_safety_afcp}), whereas ECP's online per-state reasoning degrades as obstacle density grows (Section~\ref{sec:res}).
+
+\subsection{Positioning}
+In summary, prior work either \textit{(i)} models prediction uncertainty explicitly and pays an online computational price that scales poorly with scene density, or \textit{(ii)} conformalizes scalar scores that lose the spatial coherence of the underlying field. We instead conformalize a lower bound of the predicted signed distance field as a functional object, fit an accurate envelope offline via a Gaussian-mixture inductive conformal procedure, and refine it online by a low-dimensional adaptive update~\cite{gibbs2021adaptive}, embedding the result as a tightened constraint in an MPC problem. This retains the distribution-free guarantees of CP while scaling far more gracefully than online uncertainty-reasoning baselines.
 
 % risk-aware motion planning
 
 % conformal prediction for reachability
 
 
-\begin{itemize}
-    \item robust control: DRO
+% \begin{itemize}
+%     \item robust control: DRO
 
-    \item navigation in dynamic environments
-    \begin{itemize}
-        \item perception (localization, mapping, detection, tracking, $\cdots$) \& prediction in dynamic environments
-        \begin{itemize}
-            \item SLAM $+$ MOT~\cite{wang2007simultaneous,coue2006bayesian}
+%     \item navigation in dynamic environments
+%     \begin{itemize}
+%         \item perception (localization, mapping, detection, tracking, $\cdots$) \& prediction in dynamic environments
+%         \begin{itemize}
+%             \item SLAM $+$ MOT~\cite{wang2007simultaneous,coue2006bayesian}
 
-            \item particle-based~\cite{danescu2011modeling,tanzmeister2014grid}
+%             \item particle-based~\cite{danescu2011modeling,tanzmeister2014grid}
             
-            \item random finite sets~\cite{nuss2018random,chen2023continuous}; based on~\cite{mahler2007statistical}
+%             \item random finite sets~\cite{nuss2018random,chen2023continuous}; based on~\cite{mahler2007statistical}
 
-            \item SDF learning~\cite{park2019deepsdf,ortiz2022isdf}; mostly in 3d; may be irrelevant to ours
-        \end{itemize}
+%             \item SDF learning~\cite{park2019deepsdf,ortiz2022isdf}; mostly in 3d; may be irrelevant to ours
+%         \end{itemize}
 
-        \item risk-aware motion planning~\cite{hakobyan2019risk,fan2021step,hakobyan2021wasserstein,ryu2024integrating}: no safety guarantee, exact formulation is often intractable; require substantial approximations 
-    \end{itemize}
+%         \item risk-aware motion planning~\cite{hakobyan2019risk,fan2021step,hakobyan2021wasserstein,ryu2024integrating}: no safety guarantee, exact formulation is often intractable; require substantial approximations 
+%     \end{itemize}
 
     
-\end{itemize}
+% \end{itemize}
+
+
+\section{Notation}
+For $f, g \in L^2(\mathcal{X}, d\mathrm{x})$, we denote their inner product by $\langle f, g \rangle = \int_{\mathcal{X}} f(\mathrm{x})g(\mathrm{x}) d\mathrm{x}$. For $\mathcal{O} \subseteq \mathbb{R}^d$ and $\mathrm{x}$, $D(\mathrm{x}, \mathcal{O})$ denotes the closest distance from $\mathrm{x}$ to $\mathcal{O}$: $D(\mathrm{x}, \mathcal{O})\coloneqq \inf_{\mathrm{x}'\in \mathcal{O}} \| \mathrm{x} - \mathrm{x'}\|$.
+
 
 
 \section{Preliminaries}
@@ -196,31 +224,31 @@ We also use the notation $\mathcal{A} = \mathcal{A}(\mathrm{q}) \subseteq \mathc
 \mathrm{q}_{t+1} = f(\mathrm{q}_{t}, \mathrm{u}_{t}), \quad t = 0, 1, \ldots.
 \end{equation*}
 We specifically consider a \emph{dynamic} environment where $t =0, \ldots, T$ is the time window and $\mathcal{O}_t \subseteq \mathcal{X}$ is the union of \emph{dynamic} obstacles at $t$ (which is often represented as an occupancy map in practice), which is \emph{completely unknown}. $\{ \mathcal{O}_t\}_{t = 0}^T$ is modeled as a set-valued random process, where the randomness of the process embraces \emph{environmental variations}. It is also assumed that each $\mathcal{O}_t$ is independent of $\mathrm{q}_0, \mathrm{u}_0, \ldots, \mathrm{q}_t$, which indicates that the motion of the robot does not affect the environmental occupancy $\mathcal{O}_t$.\footnote{Extending this to consider bidirectional interactions among the robot and dynamic agents is left as a future work.} We also write $\mathcal{A}_t \coloneqq \mathcal{A}(\mathrm{q}_t)$.
-Finally, to model a limited perception range, we follow the formulation of~\cite{janson2018safe} and introduce a perception map $P : \mathcal{X} \times \mathscr{C}(\mathcal{X}) \to \mathscr{M}_{\text{partial}}(\mathcal{X})$, where $\mathscr{C}(\mathcal{X})$ is the collection of all closed subsets of $\mathcal{X}$ (each $\mathcal{C} \in \mathscr{C}(\mathcal{X})$ being a union of obstacles, i.e.\ the \emph{unknown} occupancy of the world), and $\mathscr{M}_{\text{partial}}(\mathcal{X})$ is the set of all measurable \emph{partial} functions on $\mathcal{X}$,
-\begin{equation*}
-\mathscr{M}_{\text{partial}}(\mathcal{X}) \coloneqq \bigl\{ D : \mathcal{Y} \to \mathbb{R} \;\big|\; \mathcal{Y}\subseteq\mathcal{X},\ D\ \text{measurable} \bigr\}.
-\end{equation*}
-Intuitively, $P(x, \mathcal{C})$ is the signed distance field (SDF) sensed from configuration $x$ when the true geometry is $\mathcal{C}$; in practice it is realized as a truncated SDF~\cite{newcombe2011kinectfusion}, which we prefer to a binary occupancy map for its smooth, distance-aware structure. The use of \emph{partial} functions accounts for the finite sensing range.
-Let $\mathcal{C}_t$, $t \geq 0$, denote the time-varying occupancy, whose dynamics reflect the motion of the environment. At time $t$ the robot at $x_t = x(q_t)$ receives the observation $\widehat{D}_t = P(x_t, \mathcal{C}_t)$ with domain $\mathcal{D}_t$, and the region sensed up to time $t$ is
-\begin{equation*}
-\mathcal{D}_{\leq t} \coloneqq \bigcup_{\tau \leq t}\mathcal{D}_{\tau}.
-\end{equation*}
-On $\mathcal{D}_{\leq t}$ the observations are fused into an SDF estimate $D_{\leq t}: \mathcal{X} \to \mathbb{R}$, which is set to $0$ on the unexplored region $\mathcal{X} \setminus \mathcal{D}_{\leq t}$.
-Given $\mathcal{O}_t$, We define the \emph{distance function $D_t$ associated with $\mathcal{O}_t$} as
-\begin{equation*}
-D_t(\mathrm{x}) \coloneqq D(\mathrm{x}, \mathcal{O}_t) = \inf_{\mathrm{x'}\in \mathcal{O}_t} \Vert \mathrm{x} - \mathrm{x}' \Vert, \quad \mathrm{x} \in \mathcal{X}.
-\end{equation*}
+% Finally, to model a limited perception range, we follow the formulation of~\cite{janson2018safe} and introduce a perception map $P : \mathcal{X} \times \mathscr{C}(\mathcal{X}) \to \mathscr{M}_{\text{partial}}(\mathcal{X})$, where $\mathscr{C}(\mathcal{X})$ is the collection of all closed subsets of $\mathcal{X}$ (each $\mathcal{C} \in \mathscr{C}(\mathcal{X})$ being a union of obstacles, i.e.\ the \emph{unknown} occupancy of the world), and $\mathscr{M}_{\text{partial}}(\mathcal{X})$ is the set of all measurable \emph{partial} functions on $\mathcal{X}$,
+% \begin{equation*}
+% \mathscr{M}_{\text{partial}}(\mathcal{X}) \coloneqq \bigl\{ D : \mathcal{Y} \to \mathbb{R} \;\big|\; \mathcal{Y}\subseteq\mathcal{X},\ D\ \text{measurable} \bigr\}.
+% \end{equation*}
+% Intuitively, $P(x, \mathcal{C})$ is the signed distance field (SDF) sensed from configuration $x$ when the true geometry is $\mathcal{C}$; in practice it is realized as a truncated SDF~\cite{newcombe2011kinectfusion}, which we prefer to a binary occupancy map for its smooth, distance-aware structure. The use of \emph{partial} functions accounts for the finite sensing range.
+% Let $\mathcal{C}_t$, $t \geq 0$, denote the time-varying occupancy, whose dynamics reflect the motion of the environment. At time $t$ the robot at $x_t = x(q_t)$ receives the observation $\widehat{D}_t = P(x_t, \mathcal{C}_t)$ with domain $\mathcal{D}_t$, and the region sensed up to time $t$ is
+% \begin{equation*}
+% \mathcal{D}_{\leq t} \coloneqq \bigcup_{\tau \leq t}\mathcal{D}_{\tau}.
+% \end{equation*}
+% On $\mathcal{D}_{\leq t}$ the observations are fused into an SDF estimate $D_{\leq t}: \mathcal{X} \to \mathbb{R}$, which is set to $0$ on the unexplored region $\mathcal{X} \setminus \mathcal{D}_{\leq t}$.
+% Given $\mathcal{O}_t$, We define the \emph{distance function $D_t$ associated with $\mathcal{O}_t$} as
+% \begin{equation*}
+% D_t(\mathrm{x}) \coloneqq D(\mathrm{x}, \mathcal{O}_t) = \inf_{\mathrm{x'}\in \mathcal{O}_t} \Vert \mathrm{x} - \mathrm{x}' \Vert, \quad \mathrm{x} \in \mathcal{X}.
+% \end{equation*}
 
 
-Since the future occupancy $\mathcal{O}_{t+i}$ for $i > 0$ is unobservable at time $t$, it must be estimated from historical and contextual data, as modern prediction models do. We denote the $i$-step-ahead prediction made at $t$ by $\mathcal{O}_{t+i|t}$.
-For safe motion planning, we are interested in correctly estimating the (signed) distance function at $t+i$:
-\begin{equation*}
-D_{t+i}(x) \coloneqq d(x, \mathcal{O}_{t+i}), \quad x \in \mathcal{X}
-\end{equation*}
-and its $i$-step ahead prediction be:
-\begin{equation*}
-D_{t+i|t}(x) \coloneqq d(x, \mathcal{O}_{t+i|t}), \quad x \in \mathcal{X}
-\end{equation*}
+% Since the future occupancy $\mathcal{O}_{t+i}$ for $i > 0$ is unobservable at time $t$, it must be estimated from historical and contextual data, as modern prediction models do. We denote the $i$-step-ahead prediction made at $t$ by $\mathcal{O}_{t+i|t}$.
+% For safe motion planning, we are interested in correctly estimating the (signed) distance function at $t+i$:
+% \begin{equation*}
+% D_{t+i}(x) \coloneqq d(x, \mathcal{O}_{t+i}), \quad x \in \mathcal{X}
+% \end{equation*}
+% and its $i$-step ahead prediction be:
+% \begin{equation*}
+% D_{t+i|t}(x) \coloneqq d(x, \mathcal{O}_{t+i|t}), \quad x \in \mathcal{X}
+% \end{equation*}
 
 
 We are primarily interested in solving the following problem:
@@ -292,7 +320,7 @@ In contrast to prior conformal-prediction approaches in robotics, where a single
 S_{t+i\mid t}(\mathrm{x}) \;\approx\; \bar{S}_i(\mathrm{x}) + \sum_{k=1}^{r}\xi^{(k)}_{t}\,\psi_k(\mathrm{x}), \qquad r\ll\infty,
 \label{eq:lowrank-score}
 \end{equation}
-with FPCA modes $\{\psi_k\}_{k=1}^{r}\subset L^2(\mathcal{X})$ that are stable across $t$. The uncertainty is thus spatially structured and compressible, even though it is not reducible to a simple geometric cue such as path curvature or visitation density. These two properties---which we quantify on the ETH--UCY benchmark in Section~\ref{sec:spatial-regularity} (Figs.~\ref{fig:fcp_stationarity} and~\ref{fig:fcp_lowrank})---are exactly what make FCP practical: the modes $\{\psi_k\}$ and the resulting envelope $U_{t+i\mid t}\colon\mathcal{X}\to\mathbb{R}_{\ge 0}$ are estimated \emph{once, offline}, while online the controller merely evaluates $U_{t+i\mid t}(\mathrm{x})$ pointwise along its rollouts, keeping the per-step cost low. To be self-contained, we briefly explain how FCP is baked into our setting so that the learning errors are corrected for safety.
+with FPCA modes $\{\psi_k\}_{k=1}^{r}\subset L^2(\mathcal{X})$ that are stable across $t$. The uncertainty is thus spatially structured and compressible, even though it is not reducible to a simple geometric cue such as path curvature or visitation density. These two properties---which we quantify on the ETH--UCY benchmark in Section~\ref{sec:res-properties} (Figs.~\ref{fig:fcp_stationarity} and~\ref{fig:fcp_lowrank})---are exactly what make FCP practical: the modes $\{\psi_k\}$ and the resulting envelope $U_{t+i\mid t}\colon\mathcal{X}\to\mathbb{R}_{\ge 0}$ are estimated \emph{once, offline}, while online the controller merely evaluates $U_{t+i\mid t}(\mathrm{x})$ pointwise along its rollouts, keeping the per-step cost low. To be self-contained, we briefly explain how FCP is baked into our setting so that the learning errors are corrected for safety.
 
 % To avoid overestimating $D_{t+i}$, which can lead to catastrophic collisions, we consider the following score function:
 % \begin{equation}\label{eq:functional-score}
@@ -834,7 +862,7 @@ the full collection of horizon-indexed tuples cached by the controller.
 Crucially, after deployment the online controller only \emph{evaluates} the closed-form envelope~\eqref{eq:Ui_init} from the cached parameters and never \emph{re-fits} the GMM. In practice the two grids $\widehat\mu_{i,k}^\top\varphi_i(\cdot)$ and $(\varphi_i(\cdot)^\top\widehat\Sigma_{i,k}\varphi_i(\cdot))^{1/2}$ are precomputed once, so an envelope update reduces to recombining them with the (scalar-)adapted radii.
 
 \subsection{Stage 2: Online Adaptation}\label{subsec:online_update}
-Once the robot starts moving, the cached envelope is adapted online through a single scalar per horizon index, in the spirit of adaptive conformal inference~\cite{gibbs2021adaptiveconformalinferencedistribution}. Because the offline envelope~\eqref{eq:Ui_init} is parameterized by the calibrated radii $r_{i,k}$, we adapt a single scalar multiplier $c_i^{(t)}$ on those radii: this keeps the band a valid envelope at all times and yields a clean coverage event.
+Once the robot starts moving, the cached envelope is adapted online through a single scalar per horizon index, in the spirit of adaptive conformal inference~\cite{gibbs2021adaptiveconformalinferencedistribution}. Because the offline envelope~\eqref{eq:Ui_init} is parameterized by the radii $r_{i,k}$, we adapt a single scalar multiplier $c_i^{(t)}$ on those radii: this keeps the band a valid envelope at all times and yields a clean coverage event.
 At time $t$, once a realized residual field $S^{\mathrm{on}}_{i,t}$ matures for horizon index $i$, we form the \emph{functional} violation indicator
 \begin{equation}
 \mathrm{err}^{(t)}_i = \mathbb{I}\!\left[\exists x\in\bar{\mathcal X}:\ S^{\mathrm{on}}_{i,t}(x) > \widetilde U_{i,t}(x)\right],
@@ -1065,56 +1093,16 @@ This completes the proof, verifying that the point-wise safety of the robot is i
 
 
 \section{Experimental Setup}
-We evaluate the proposed \emph{Conformal SDF} framework and its integration into a model predictive controller.
-Our experiments are designed to assess how functional conformal prediction of
-the signed distance field affects safety, feasibility, and efficiency in
-closed-loop motion planning under prediction uncertainty.
+We evaluate how functional conformal prediction of the signed distance field affects
+safety, feasibility, and efficiency in closed-loop motion planning under prediction
+uncertainty, and how it integrates into a sampling-based model predictive controller.
+We study two settings of increasing complexity: standard 2D pedestrian navigation
+benchmarks, a controlled and well-studied testbed for quantitative comparison against
+baselines, and a 3D quadrotor navigation task that stresses the method under dense,
+uncertain dynamics in a higher-dimensional workspace.
 
-To this end, we conduct experiments at increasing levels of complexity:
-a 2D toy setting for visualizing conformalized distance fields,
-standard 2D pedestrian navigation benchmarks for quantitative evaluation, and
-a challenging 3D quadrotor navigation task for assessing closed-loop performance
-under dense, uncertain dynamics.
-
-Across all settings, conformal prediction is applied to conformalize a lower bound
-of the predicted signed distance field, which is then enforced as a hard safety
-constraint within MPC.
-
-\paragraph{CP}
-We collect a calibration set of length $T_{\mathrm{cal}}$ and compute
-residual SDF fields $R_{t+i\mid t}(x) = D_{t+i\mid t}(x) - D_{t+i}(x)$ over a
-3D grid for each horizon step $i \in \{1,\dots,H\}$.
-The residual fields are projected onto a $p$-dimensional subspace using PCA and
-modeled via a $K$-component Gaussian mixture model (GMM) in coefficient space.
-We set the target miscoverage level to $\alpha$ and compute horizon-dependent
-upper envelopes $U_{t+i\mid t}(x)$, yielding the conformal lower-bound SDF
-defined in~\eqref{eq:lower_field_def}.
-
-\subsection{Conformal SDF Visualization at 2D}
-Figure~\ref{fig:sdf_visualization_2d} shows an illustrative 2D example where the
-conformal lower bound expands the unsafe region in areas of high uncertainty.
-
-
-\begin{figure}[t]
-    \centering
-    \includegraphics[width=\columnwidth]{multi_obs_H2.png}
-    \caption{2D conformal SDF visualization at a representative time.
-    \textbf{Left:} ground-truth signed distance field.
-    \textbf{Right:} conformal lower-bound field.
-    Dashed contours indicate the safety threshold $r_{\mathrm{safe}}$.}
-    \label{fig:sdf_visualization_2d}
-\end{figure}
-
-\subsection{CP-Informed MPC in 2D Pedestrian Environments}
-
-Before evaluating the proposed framework in complex 3D scenarios, we first
-validate its effectiveness in standard 2D pedestrian navigation benchmarks.
-These experiments serve as a controlled testbed to examine how spatial
-conformal prediction affects safety, feasibility, and efficiency in a
-well-studied setting.
-
-\paragraph{2D Simulation Setup}
-We evaluate all methods on all five ETH--UCY pedestrian datasets---
+\subsection{2D Pedestrian Benchmarks}
+We evaluate all methods on all five ETH--UCY pedestrian datasets~\cite{pellegrini2009you,lerner2007crowds}---
 \texttt{eth}, \texttt{hotel}, \texttt{univ}, \texttt{zara1}, and \texttt{zara2}.
 Pedestrian trajectories are taken from real-world recordings, and a mobile robot
 is tasked with navigating toward a fixed goal while avoiding dynamic pedestrians.
@@ -1123,48 +1111,10 @@ At each planning step, the robot observes recent pedestrian state histories and
 receives predicted future trajectories over a fixed planning horizon.
 A Trajectron++~\cite{salzmann2020trajectron}
 predictor is used as the base prediction model.
-This setup allows us to isolate the effect of \emph{offline error quantification}
+This setup isolates the effect of \emph{offline error quantification}
 independently of the prediction model itself.
 
-\subsubsection{Spatial regularity of the residual field.}
-\label{sec:spatial-regularity}
-Before the closed-loop comparison, we verify on ETH--UCY the two properties that justify
-calibrating the envelope offline (Section~\ref{subsec:fcp-why}).
-Figure~\ref{fig:fcp_stationarity} tests \emph{time-invariance}: estimating the per-cell
-residual statistics from two temporally disjoint halves of each scene yields closely
-agreeing fields (cell-mean correlation $r=0.71$--$0.91$ across \texttt{eth}, \texttt{univ},
-and \texttt{hotel}), so the field is a stable property of the scene rather than of a
-particular time.
-Figure~\ref{fig:fcp_lowrank} tests \emph{low rank}: a functional PCA of the residual fields
-shows that $5$--$7$ components already explain $90\%$ of the variance on most scenes, and the
-leading eigenfunction is a smooth, scene-frame spatial mode.
-Together these confirm that the residual field is spatially structured and compressible
-without being reducible to a simple cue such as path curvature or visitation density---the
-premise that lets an offline-calibrated envelope transfer online at low cost.
-
-\begin{figure*}[t]
-    \centering
-    \includegraphics[width=0.92\linewidth]{fcp_stationarity_split.png}
-    \caption{The residual field is approximately \emph{time-invariant}. Per-cell residual
-    means estimated from temporally disjoint early (\textbf{left}) and late (\textbf{middle})
-    halves of \texttt{univ} agree closely (\textbf{right}; cell-mean correlation $r=0.71$),
-    indicating the field is a stable property of the scene rather than of a particular
-    time --- the premise that lets an offline-calibrated envelope transfer online.}
-    \label{fig:fcp_stationarity}
-\end{figure*}
-
-\begin{figure*}[t]
-    \centering
-    \includegraphics[width=0.92\linewidth]{fcp_lowrank_fpca.png}
-    \caption{The residual score field is \emph{low-rank}. \textbf{Left:} cumulative variance
-    explained by the leading functional principal components on each ETH--UCY scene;
-    $5$--$7$ components already reach $90\%$ (dashed) on most scenes. \textbf{Right:} the
-    leading eigenfunction $\psi_1$ (\texttt{univ}), a smooth scene-frame spatial mode. The
-    low effective dimension is what lets the envelope be learned offline.}
-    \label{fig:fcp_lowrank}
-\end{figure*}
-
-\subsubsection{Robot dynamics.}
+\paragraph{Robot dynamics.}
 Let the robot state be $z_t=(x_t,y_t,\theta_t)\in\mathbb R^2\times S^1$ and the control input be
 $u_t=(v_t,\omega_t)\in\mathcal U$.
 We use the discrete-time unicycle model
@@ -1189,9 +1139,8 @@ We compare four controllers spanning how prediction uncertainty is handled:
 \item \emph{ACP-MPC}: online adaptation of conformal bounds; and
 \item \emph{FCP-MPC} (ours): offline functional conformal prediction of the signed-distance field.
 \end{itemize}
-For FCP-MPC we evaluate both a hard- and a soft-constraint formulation, ablating in
-each case the online coefficient adaptation of~\eqref{eq:acp_update} to assess its
-effect on overconservatism at long horizons.
+For FCP-MPC we evaluate both a hard- and a soft-constraint formulation, and in each
+case ablate the optional online adaptation of~\eqref{eq:acp_update}.
 
 
 
@@ -1228,15 +1177,8 @@ Table~\ref{tab:2d_ablation} isolates the effect of the online envelope adaptatio
 within each variant.
 
 
-\subsection{CP-Informed MPC in 3D}
-We embed the conformal SDF into MPC by replacing the nominal distance constraint
-with the conformal lower bound:
-\begin{equation}
-\underline{D}_{t+i\mid t}(x_{t+i}) \ge r_{\mathrm{safe}}, \qquad i=1,\dots,H.
-\end{equation}
-
-\paragraph{3D Experimental Setup}
-We evaluate FCP-MPC in a challenging physics-based quadrotor navigation task
+\subsection{3D Quadrotor Benchmark}
+We evaluate FCP-MPC in a physics-based quadrotor navigation task
 implemented in PyBullet.
 The robot is modeled as a quadrotor with a low-level PID controller running at
 240\,Hz, while the high-level MPC planner operates at a slower planning period
@@ -1279,10 +1221,64 @@ evaluated seeds.
 
 
 
-\section{Results and Analysis}
+\section{Results and Analysis}\label{sec:res}
 Qualitative rollouts indicate that FCP-MPC adapts conservativeness to spatially
 varying uncertainty: it becomes more conservative in crowded or uncertain regions
 while remaining less restrictive in open areas.
+
+\subsection{Properties of the Residual Field}
+\label{sec:res-properties}
+We first examine the two properties of the residual field that justify conformalizing
+the envelope offline (Section~\ref{subsec:fcp-why}).
+Figure~\ref{fig:fcp_stationarity} shows \emph{time-invariance}: per-cell residual
+statistics estimated from two temporally disjoint halves of each scene agree closely
+(cell-mean correlation $r=0.71$--$0.91$ across \texttt{eth}, \texttt{univ}, and
+\texttt{hotel}), so the field is a stable property of the scene rather than of a
+particular time.
+Figure~\ref{fig:fcp_lowrank} shows \emph{low rank}: a functional PCA of the residual
+fields finds that $5$--$7$ components already explain $90\%$ of the variance on most
+scenes, with a smooth, scene-frame leading eigenfunction.
+Together these confirm that the field is spatially structured and compressible without
+reducing to a simple cue such as path curvature or visitation density---the premise
+that lets an offline-conformalized envelope transfer online at low cost.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.92\linewidth]{fcp_stationarity_split.png}
+    \caption{The residual field is approximately \emph{time-invariant}. Per-cell residual
+    means estimated from temporally disjoint early (\textbf{left}) and late (\textbf{middle})
+    halves of \texttt{univ} agree closely (\textbf{right}; cell-mean correlation $r=0.71$),
+    indicating the field is a stable property of the scene rather than of a particular
+    time --- the premise that lets an offline-conformalized envelope transfer online.}
+    \label{fig:fcp_stationarity}
+\end{figure*}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.92\linewidth]{fcp_lowrank_fpca.png}
+    \caption{The residual score field is \emph{low-rank}. \textbf{Left:} cumulative variance
+    explained by the leading functional principal components on each ETH--UCY scene;
+    $5$--$7$ components already reach $90\%$ (dashed) on most scenes. \textbf{Right:} the
+    leading eigenfunction $\psi_1$ (\texttt{univ}), a smooth scene-frame spatial mode. The
+    low effective dimension is what lets the envelope be learned offline.}
+    \label{fig:fcp_lowrank}
+\end{figure*}
+
+Figure~\ref{fig:sdf_visualization_2d} visualizes the resulting conformalized signed
+distance field on a representative \texttt{zara1} scene: alongside the ground-truth
+field, the conformal lower bound expands the unsafe region around pedestrians whose
+predicted motion is more uncertain, widening the safety margin where prediction error
+is largest.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{multi_obs_H2.png}
+    \caption{2D conformal SDF visualization at a representative time.
+    \textbf{Left:} ground-truth signed distance field.
+    \textbf{Right:} conformal lower-bound field.
+    Dashed contours indicate the safety threshold $r_{\mathrm{safe}}$.}
+    \label{fig:sdf_visualization_2d}
+\end{figure}
 
 \subsection{2D Pedestrian Navigation}
 Table~\ref{tab:2d_results} reports quantitative results on the ETH--UCY pedestrian
@@ -1312,7 +1308,7 @@ cost of higher collisions in the densest scenes (\texttt{univ}, \texttt{zara2}).
 control time far below ECP-MPC (a few milliseconds vs.\ tens), because uncertainty is
 quantified offline and the controller only evaluates the cached conformal field online.
 Rather than dominating every metric, FCP-MPC offers a favorable
-safety--feasibility--efficiency trade-off: the same calibrated field can be enforced
+safety--feasibility--efficiency trade-off: the same conformalized field can be enforced
 strictly (hard) or used to shape the cost (soft) as the scene demands.
 
 \begin{table*}[!t]
@@ -1321,7 +1317,7 @@ strictly (hard) or used to shape the cost (soft) as the scene demands.
 \caption{2D navigation results on ETH--UCY pedestrian datasets.
 All metrics are averaged across scenes; lower is better.
 The FCP-MPC (hard) and FCP-MPC (soft) rows use our core method with the
-\emph{offline-calibrated} envelope, so all methods are compared like-for-like;
+\emph{offline-conformalized} envelope, so all methods are compared like-for-like;
 the optional online adaptation (AFCP)~\eqref{eq:acp_update} is isolated in the
 ablation of Table~\ref{tab:2d_ablation}.}
 \label{tab:2d_results}
@@ -1372,7 +1368,7 @@ slightly.
 Because the update merely recombines the precomputed grids of
 Section~\ref{sec:score-comp}, it adds only a few milliseconds per step and stays well
 below the cost of ECP-MPC.
-On this benchmark, then, the offline-calibrated envelope already does the heavy lifting,
+On this benchmark, then, the offline-conformalized envelope already does the heavy lifting,
 and online adaptation is a low-cost option---valuable chiefly as a hedge against
 distribution shift---rather than a necessity.
 
@@ -1488,7 +1484,7 @@ of milliseconds to over $200$\,ms at $N_{\mathrm{obs}}=280$, and ECP-MPC---which
 performs pointwise conformal reasoning across obstacles and horizon steps---is one to two
 orders of magnitude slower throughout and never meets the $100$\,ms budget.
 ACP-MPC, moreover, conformalizes only a single pointwise radius; FCP-MPC retains a
-calibrated safety \emph{field} while being the most scalable method in dense 3D.
+conformalized safety \emph{field} while being the most scalable method in dense 3D.
 
 
 
@@ -1524,7 +1520,7 @@ the goal.
 ACP-MPC's pointwise inflation is cheaper per query but still re-checks every obstacle, and
 it too crashes without reaching the goal.
 CC-MPC reaches the goal but, lacking any uncertainty model, is both slower and less safe.
-FCP-MPC moves the expensive calibration offline, so at runtime safety is a fieldwise query
+FCP-MPC moves the expensive computation offline, so at runtime safety is a fieldwise query
 against a cached bound---fast, largely obstacle-count-insensitive, and predictable.
 
 \paragraph{Certified hard filter vs.\ practical soft deployment.}
