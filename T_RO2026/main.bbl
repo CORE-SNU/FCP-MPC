@@ -145,16 +145,34 @@ R.~A. Newcombe, S.~Izadi, O.~Hilliges, D.~Molyneaux, D.~Kim, A.~J. Davison,
   Symposium on Mixed and Augmented Reality}.\hskip 1em plus 0.5em minus
   0.4em\relax IEEE, 2011, pp. 127--136.
 
+\bibitem{zhang2020optimization}
+X.~Zhang, A.~Liniger, and F.~Borrelli, ``Optimization-based collision
+  avoidance,'' \emph{IEEE Transactions on Control Systems Technology}, vol.~29,
+  no.~3, pp. 972--983, 2020.
+
 \bibitem{deits2015computing}
 R.~Deits and R.~Tedrake, ``Computing large convex regions of obstacle-free
   space through semidefinite programming,'' in \emph{Algorithmic Foundations of
-  Robotics XI}, ser. Springer Tracts in Advanced Robotics.\hskip 1em plus 0.5em
-  minus 0.4em\relax Springer, 2015, vol. 107, pp. 109--124.
+  Robotics XI: Selected Contributions of the Eleventh International Workshop on
+  the Algorithmic Foundations of Robotics}.\hskip 1em plus 0.5em minus
+  0.4em\relax Springer, 2015, pp. 109--124.
+
+\bibitem{yamauchi1998frontier}
+B.~Yamauchi, ``Frontier-based exploration using multiple robots,'' in
+  \emph{Proceedings of the second international conference on Autonomous
+  agents}, 1998, pp. 47--53.
 
 \bibitem{fraichard2004inevitable}
 T.~Fraichard and H.~Asama, ``Inevitable collision states --- a step towards
   safer robots?'' \emph{Advanced Robotics}, vol.~18, no.~10, pp. 1001--1024,
   2004.
+
+\bibitem{williams2017information}
+G.~Williams, N.~Wagener, B.~Goldfain, P.~Drews, J.~M. Rehg, B.~Boots, and E.~A.
+  Theodorou, ``Information theoretic {MPC} for model-based reinforcement
+  learning,'' in \emph{2017 IEEE International Conference on Robotics and
+  Automation (ICRA)}.\hskip 1em plus 0.5em minus 0.4em\relax IEEE, 2017, pp.
+  1714--1721.
 
 \bibitem{scokaert1999feasibility}
 P.~O.~M. Scokaert and J.~B. Rawlings, ``Feasibility issues in linear model

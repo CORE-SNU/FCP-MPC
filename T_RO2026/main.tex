@@ -103,6 +103,7 @@ conformal prediction for safe motion planning~\cite{lindemann2023safeplanning, d
 
 \subsection{Notation}
 For $f, g \in L^2(\mathcal{X}, d\mathrm{x})$, we denote their inner product by $\langle f, g \rangle = \int_{\mathcal{X}} f(\mathrm{x})g(\mathrm{x}) d\mathrm{x}$.
+We write $r_{\mathrm{safe}} \coloneqq r_{\mathrm{robot}} + r_{\mathrm{obs}} + \delta$ for the safety radius (robot radius, obstacle radius, and user margin), $\epsilon$ for the low-level tracking-error bound, and $[\,\cdot\,]_+ \coloneqq \max(\cdot,0)$.
 
 
 
@@ -599,11 +600,7 @@ Let $\widetilde U_{i,t}(\mathrm{x})$ denote the online envelope at horizon index
 which is the online realization of $\mathsf{L}_{t+i|t}$ in~\eqref{eq:mpc-constraint-corrected} (clipped at $0$).
 
 \subsubsection{Robust CP-safe set via constraint tightening.}
-Let
-\[
-r_{\mathrm{safe}} = r_{\mathrm{robot}} + r_{\mathrm{obs}}
-\]
-denote the nominal safety radius.
+Recall the safety radius $r_{\mathrm{safe}} = r_{\mathrm{robot}} + r_{\mathrm{obs}} + \delta$; for point obstacles ($r_{\mathrm{obs}}=0$) it reduces to the $\delta+r_{\mathrm{robot}}$ of~\eqref{eq:collision-constraint}.
 The conformal envelope $\widetilde U_{i,t}$ grows with the horizon index $i$ as prediction errors compound, so enforcing the full clearance $r_{\mathrm{safe}}$ against \emph{every} far-horizon step makes the conformal constraint increasingly conservative and can shrink the feasible set to the point of emptiness. To curb this long-horizon conservativeness---without weakening the near-term constraint that governs the control actually applied---we relax the required clearance with the time-to-go, following an inevitable-collision-state (ICS) argument~\cite{fraichard2004inevitable}: under bounded controls the robot retains the maneuverability to evade an obstacle that is still several steps away. Concretely, we introduce a horizon-dependent evasion budget
 \begin{equation}
 \Delta_i \coloneqq \tfrac{1}{2}\, a_{\mathrm{lat}}^{\max}\,\bigl((i-1)\Delta t\bigr)^2,
@@ -623,14 +620,15 @@ Because $\Delta_1=0$, the first (immediately applied) step retains the full tigh
 Consequently the closed-loop guarantees of Theorems~\ref{thm:asymptotic_safety} and~\ref{thm:asymptotic_safety_afcp}, whose proofs invoke the constraint only at the applied $i=1$ step, continue to hold verbatim; the same effective radius $\max(r_{\mathrm{safe}}+\epsilon-\Delta_i,0)$ is reused inside the soft safety-shaping penalty.
 
 \subsection{Implementation.}
-Incorporating the conformalized constraint~\eqref{eq:mpc-constraint-corrected} into~\eqref{eq:mpc-constraint-naive} leads to the following MPC formulation:
+Incorporating the robustly tightened CP-safe set~\eqref{eq:cp_safe_set_mpc} into the planning problem~\eqref{eq:mpc-constraint-naive} leads to the following MPC formulation:
 \begin{align}
 \min_{\mathbf{q}, \mathbf{u}}&\ \ \mathfrak{L}(\mathbf{q}, \mathbf{u}, \mathbf{x}^{\text{ref}}) \nonumber \\
 \text{s.t.}
 &\ \ \mathrm{q}_{t|t} = \mathrm{q}_t, \nonumber \\
 &\ \ \mathrm{q}_{t+i+1|t} = f(\mathrm{q}_{t+i|t}, \mathrm{u}_{t+i|t}), \quad 0 \leq i < N, \nonumber\\
-&\ \ \mathsf{L}_{t+i|t}(\mathrm{x}_{t+i|t}) \geq \delta + r_{\text{robot}}, \quad 1\leq i \leq N. \label{eq:mpc-constraint-fcp}
+&\ \ \underline D_{t+i|t}(\mathrm{x}_{t+i|t}) \geq \max\!\left(r_{\mathrm{safe}}+\epsilon-\Delta_i,\,0\right), \quad 1\leq i \leq N, \label{eq:mpc-constraint-fcp}
 \end{align}
+i.e.\ $\mathrm{x}_{t+i|t}\in\mathcal S^{\mathrm{cp}}_{t+i|t}$; this generalizes the basic constraint~\eqref{eq:mpc-constraint-corrected}, which it recovers when the tracking margin $\epsilon$ and the ICS budget $\Delta_i$ vanish.
 Rather than solving this nonlinear program exactly, a sampling-based MPC, such as model predictive path integral (MPPI)~\cite{williams2017information}, can be used as a affordable implementation.
 At each planning step, we draw $K_p$ candidate input sequences
 \begin{equation*}
@@ -664,7 +662,7 @@ where $u^{(k)}_{t+i|t}$ is randomly sampled from $\mathcal{U}$.
 {\bf Hard Constraints vs Soft Penalization.}
 This can be mitigated by modeling them implicitly as \emph{soft constraints}~\cite{scokaert1999feasibility,kerrigan2000soft}: in place of enforcing the hard constraints, the constraints are incorporated into the objective function of the MPC problem as an extra graded term that penalizes the violation of the constraints. Specifically, define the per-step margin by which a position falls short of the tightened, ICS-relaxed clearance,
 \begin{equation}
-g_{t+i|t}(\mathrm{x}):= \left[ \delta + r_{\text{robot}} -\Delta_i \right]_+ - \mathsf{L}_{t+i|t}(\mathrm{x}),
+g_{t+i|t}(\mathrm{x}):= \left[ r_{\mathrm{safe}}+\epsilon-\Delta_i \right]_+ - \underline D_{t+i|t}(\mathrm{x}),
 \label{eq:soft_margin}
 \end{equation}
 so that the CP-safe set is the zero-sublevel set $\mathcal S^{\mathrm{cp}}_{t+i|t}=\{x:\,g_{t+i|t}(x)\le 0\}$. Then, the soft version of the MPC is stated as follows:
@@ -1081,9 +1079,9 @@ constraint within MPC.
 
 \paragraph{CP}
 We collect a calibration set of length $T_{\mathrm{cal}}$ and compute
-residual SDF fields $R_{t+i\mid t}(x) = D_{t+i\mid t}(x) - D_{t+i}(x)$ over a
-3D grid for each horizon step $i \in \{1,\dots,H\}$.
-The residual fields are projected onto a $p$-dimensional subspace using PCA and
+residual score fields $S_{t+i\mid t}(x) = D_{t+i\mid t}(x) - D_{t+i}(x)$ over a
+grid for each horizon step $i \in \{1,\dots,H\}$.
+The residual fields are projected onto a $p$-dimensional subspace using FPCA and
 modeled via a $K$-component Gaussian mixture model (GMM) in coefficient space.
 We set the target miscoverage level to $\alpha$ and compute horizon-dependent
 upper envelopes $U_{t+i\mid t}(x)$, yielding the conformal lower-bound SDF
@@ -1273,10 +1271,8 @@ $0.25\,\mathrm{m}$ or a maximum step limit is reached.
 \paragraph{Evaluation Metrics}
 We use the same closed-loop metrics as in the 2D study---collision rate, infeasible
 rate, time-to-goal, and per-step runtime---with collision now defined by the minimum
-robot--obstacle distance violating $r_{\mathrm{safe}}$. For spatial evaluation we
-additionally report the \emph{containment} of the unsafe set (whether the true unsafe
-region lies inside the conformal unsafe region) and a voxel-wise \emph{recall} of the
-true unsafe set. All metrics are averaged over the evaluated scenes of each dataset.
+robot--obstacle distance violating $r_{\mathrm{safe}}$. All metrics are averaged over the
+evaluated seeds.
 
 
 
@@ -1374,25 +1370,6 @@ Because the update operates on the low-dimensional coefficients evaluated on the
 discretization grid of Section~\ref{sec:score-comp}, it adds only a few milliseconds
 of online computation and stays well below the cost of ECP-MPC.
 
-\begin{figure}[!t]
-  \centering
-  \includegraphics[width=\columnwidth]{Func_cp_3d_zoom.png}
-  \caption{True and conformal safety bounds in 3D, zoomed onto a single obstacle.
-  The solid blue ball is the \emph{true} safety boundary
-  $D_{t+i}(x)=r_{\mathrm{safe}}$ around the actual obstacle (used only for
-  evaluation); the translucent red shell is the \emph{conformal lower-bound}
-  boundary $\underline{D}_{t+i\mid t}(x)=r_{\mathrm{safe}}$ obtained from the
-  functional conformal prediction, i.e.\ the nominal safety region around the predicted
-  center inflated by the margin. The conformal surface
-  encloses the true one, certifying coverage, and the executed FCP-MPC path
-  (green) threads just outside it---progressing efficiently while respecting the
-  worst-case safety constraint. Faint gray spheres are other obstacles in the
-  scene.}
-  \label{fig:fcp_3d}
-\end{figure}
-
-
-
 \subsection{3D Quadrotor Navigation}
 Table~\ref{tab:pybullet_results} reports closed-loop results at $M=280$ dynamic
 obstacles and noisy predictions (prediction noise $0.20$, obstacle process noise
@@ -1428,6 +1405,23 @@ Figure~\ref{fig:fcp_3d} illustrates the conformal bound in 3D, and
 Figure~\ref{fig:traj_3d} compares closed-loop trajectories across three seeds:
 FCP-MPC threads to the goal in every panel while the baselines stall or fall
 (red~$\times$) early in the field.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{Func_cp_3d_zoom.png}
+  \caption{True and conformal safety bounds in 3D, zoomed onto a single obstacle.
+  The solid blue ball is the \emph{true} safety boundary
+  $D_{t+i}(x)=r_{\mathrm{safe}}$ around the actual obstacle (used only for
+  evaluation); the translucent red shell is the \emph{conformal lower-bound}
+  boundary $\underline{D}_{t+i\mid t}(x)=r_{\mathrm{safe}}$ obtained from the
+  functional conformal prediction, i.e.\ the nominal safety region around the predicted
+  center inflated by the margin. The conformal surface
+  encloses the true one, certifying coverage, and the executed FCP-MPC path
+  (green) threads just outside it---progressing efficiently while respecting the
+  worst-case safety constraint. Faint gray spheres are other obstacles in the
+  scene.}
+  \label{fig:fcp_3d}
+\end{figure}
 
 \begin{figure*}[!t]
   \centering
