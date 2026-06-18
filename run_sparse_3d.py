@@ -33,7 +33,9 @@ def main():
             results.append(r)
 
     D.METHOD_LABELS = LABELS
-    timing = D.run_timing_sequential([30, 31, 32], [N_OBS], 40, eb)
+    # Use all seeds for the timing pass too (cheap at N_obs=50) so ECP has post-warmup
+    # samples after warmup-step exclusion; otherwise its control-time cell can be empty.
+    timing = D.run_timing_sequential(SEEDS, [N_OBS], 40, eb)
     pickle.dump({"results": results, "timing": timing}, open(OUT_PKL, "wb"))
 
     # write the sparse table to its own file
