@@ -157,7 +157,7 @@ def main():
                          vmin=-vmax, vmax=vmax, aspect="auto")
         fig.colorbar(im, ax=ax_p, fraction=0.046, label=r"$\phi_1(x)$")
         ax_p.set_title(rf"Leading eigenfunction $\phi_1$ ({args.phi_dataset}, "
-                       rf"{cumvar[0]*100:.0f}\% var)", fontsize=10)
+                       rf"{cumvar[0]*100:.0f}% var)", fontsize=10)
         ax_p.set_xlabel("x (m, scene frame)")
         ax_p.set_ylabel("y (m, scene frame)")
 
