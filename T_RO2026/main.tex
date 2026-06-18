@@ -1318,10 +1318,10 @@ strictly (hard) or used to shape the cost (soft) as the scene demands.
 \small
 \caption{2D navigation results on ETH--UCY pedestrian datasets.
 All metrics are averaged across scenes; lower is better.
-The FCP-MPC (hard) and FCP-MPC (soft) rows use our full method with the
-\emph{online-adapted} (AFCP) envelope of~\eqref{eq:acp_update};
-Table~\ref{tab:2d_ablation} ablates the fixed offline (FCP) versus
-online-adapted (AFCP) choice for each constraint mode.}
+The FCP-MPC (hard) and FCP-MPC (soft) rows use our core method with the
+\emph{offline-calibrated} envelope, so all methods are compared like-for-like;
+the optional online adaptation (AFCP)~\eqref{eq:acp_update} is isolated in the
+ablation of Table~\ref{tab:2d_ablation}.}
 \label{tab:2d_results}
 \input{table_2d_results.tex}
 \end{table*}
