@@ -1221,7 +1221,7 @@ evaluated seeds.
 
 
 
-\section{Results and Analysis}\label{sec:res}
+\section{Results}\label{sec:res}
 Qualitative rollouts indicate that FCP-MPC adapts conservativeness to spatially
 varying uncertainty: it becomes more conservative in crowded or uncertain regions
 while remaining less restrictive in open areas.
@@ -1307,9 +1307,6 @@ every scene and gives the shortest paths (lowest steps-to-goal on all five scene
 cost of higher collisions in the densest scenes (\texttt{univ}, \texttt{zara2}). Both keep
 control time far below ECP-MPC (a few milliseconds vs.\ tens), because uncertainty is
 quantified offline and the controller only evaluates the cached conformal field online.
-Rather than dominating every metric, FCP-MPC offers a favorable
-safety--feasibility--efficiency trade-off: the same conformalized field can be enforced
-strictly (hard) or used to shape the cost (soft) as the scene demands.
 
 \begin{table*}[!t]
 \centering
@@ -1368,9 +1365,6 @@ slightly.
 Because the update merely recombines the precomputed grids of
 Section~\ref{sec:score-comp}, it adds only a few milliseconds per step and stays well
 below the cost of ECP-MPC.
-On this benchmark, then, the offline-conformalized envelope already does the heavy lifting,
-and online adaptation is a low-cost option---valuable chiefly as a hedge against
-distribution shift---rather than a necessity.
 
 \subsection{3D Quadrotor Navigation}
 Table~\ref{tab:pybullet_results} reports closed-loop results at $M=280$ dynamic
@@ -1490,20 +1484,22 @@ conformalized safety \emph{field} while being the most scalable method in dense 
 
 
 
-\subsection{Discussion}
+\section{Discussion}
 \label{sec:discussion}
 \paragraph{Enforcing the safety bound in 2D.}
 The 2D benchmarks isolate how the conformal lower bound should be \emph{used}
 once it has been constructed.
-The hard variant attains the lowest collision rates but, because the worst-case
-envelope compounds over the horizon, can become overconservative and leave a
-non-zero infeasible rate; the soft variant removes this infeasibility by treating
-the bound as a penalty rather than a hard constraint, at the price of a higher
-collision rate in the densest scenes (Table~\ref{tab:2d_results}).
-The online coefficient adaptation of~\eqref{eq:acp_update} directly counteracts the
-overconservatism of the hard variant, substantially lowering its infeasible rate
-while leaving collisions essentially unchanged (Table~\ref{tab:2d_ablation}).
-Both effects reuse the offline conformal prediction, so the added online cost is only a few
+The hard variant enforces the bound as a feasibility filter and so carries the
+closed-loop guarantee, but because the worst-case envelope compounds over the horizon
+it can become overconservative, leaving a non-zero infeasible rate and higher collisions
+in the densest scenes; the soft variant removes this infeasibility by treating the bound
+as a penalty rather than a hard constraint and yields the shortest paths, at the price of
+a higher collision rate in the densest scenes (Table~\ref{tab:2d_results}).
+The optional online adaptation of~\eqref{eq:acp_update} is a low-cost refinement whose
+effect on these in-distribution benchmarks is marginal and scene-dependent
+(Table~\ref{tab:2d_ablation}): the offline-conformalized envelope does the heavy lifting,
+and online adaptation is valuable chiefly as a hedge against distribution shift.
+Both variants reuse the offline conformal prediction, so any online cost is only a few
 milliseconds---far below the tens of milliseconds required by ECP-MPC's explicit
 online uncertainty reasoning.
 These pedestrian experiments thus stress-test the fieldwise conformal prediction in a regime
