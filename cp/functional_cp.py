@@ -36,6 +36,12 @@ class CPConfig:
     n_jobs: int = 1
     backend: str = "loky"
 
+    # If True, split the budget by Bonferroni: alpha_gmm = alpha_eps = alpha_total/2
+    # (combined band covers at 1-alpha, but conservative). If False, each of the two
+    # conformal steps uses the full alpha (tighter; combined worst-case union is 1-2*alpha,
+    # with the empirical combined coverage validated to track 1-alpha).
+    split_alpha: bool = False
+
     # numerical stability
     cov_jitter: float = 1e-8
 
@@ -77,11 +83,20 @@ class CPStepParameters:
     # projection slack ε_i (L_infty reconstruction error bound)
     epsilon: float
 
-    # Upper-quantile coefficient vector (length = p_eff)
+    # Upper-quantile coefficient vector (length = p_eff) -- LEGACY box surrogate,
+    # retained only for backward compatibility; the envelope is the support function below.
     coeff_upper: np.ndarray
 
     # effective projection dimension p_i
     p_eff: int
+
+    # --- LRW support-function parameters (the actual envelope; cf. class docstring) ---
+    means: Optional[np.ndarray] = None     # (K, p_eff)  GMM component means in coeff space
+    sigmas: Optional[np.ndarray] = None    # (K, p_eff, p_eff)  component covariances (+jitter)
+    radii: Optional[np.ndarray] = None     # (K,)  calibrated ellipsoidal radii r_{k,i}(lambda)
+    weights: Optional[np.ndarray] = None   # (K,)  mixture weights pi_k (for lambda->radii recompute)
+    log_norm: Optional[np.ndarray] = None  # (K,)  log normalizing const of N(mu_k,Sigma_k)
+    lam: float = 0.0                       # conformal density level lambda_i
 
 
 # ==============================================================================
@@ -375,8 +390,14 @@ class PCAGMMResidualCP:
         N, Yw, grid_shape, D = self._get_flat_view(t_idx)
         p_eff = int(min(self.cfg.p_base, N, D))
 
-        alpha_eps = self.cfg.alpha_total
-        alpha_gmm = self.cfg.alpha_total
+        # Bonferroni split: half the budget to the coefficient-region (GMM) band and
+        # half to the projection-residual slack, so the combined band covers at 1-alpha.
+        if self.cfg.split_alpha:
+            alpha_eps = self.cfg.alpha_total / 2.0
+            alpha_gmm = self.cfg.alpha_total / 2.0
+        else:
+            alpha_eps = self.cfg.alpha_total
+            alpha_gmm = self.cfg.alpha_total
 
         # 1) PCA projection
         pca = PCA(n_components=p_eff, svd_solver="randomized", random_state=self.cfg.random_state)
@@ -410,17 +431,21 @@ class PCAGMMResidualCP:
         sigmas = gmm.covariances_ + self.cfg.cov_jitter * np.eye(p_eff)
 
         rks = np.zeros(K_val, dtype=np.float32)
+        log_norms = np.zeros(K_val, dtype=np.float64)
         for k in range(K_val):
             pi_k = float(gmm.weights_[k])
             threshold_k = lam / max(pi_k, 1e-12)
 
             Sigma_k = sigmas[k]
             logZk = _log_norm_const(Sigma_k, p_eff)
+            log_norms[k] = logZk
 
             val_log = math.log(max(threshold_k, 1e-300)) + logZk
             rk_sq = max(0.0, -2.0 * val_log)
             rks[k] = float(math.sqrt(rk_sq))
 
+        # Legacy per-coordinate box vector (kept for backward compatibility only;
+        # the envelope used everywhere is now the support function of {mu_k, Sigma_k, r_k}).
         diag_std = np.sqrt(np.clip(np.diagonal(sigmas, axis1=1, axis2=2), 0.0, None))
         coeff_upper = np.max(
             gmm.means_ + rks[:, None] * diag_std,
@@ -434,18 +459,39 @@ class PCAGMMResidualCP:
             epsilon=float(epsilon),
             coeff_upper=coeff_upper,
             p_eff=p_eff,
+            means=gmm.means_.astype(np.float32),
+            sigmas=sigmas.astype(np.float32),
+            radii=rks.astype(np.float32),
+            weights=gmm.weights_.astype(np.float32),
+            log_norm=log_norms.astype(np.float32),
+            lam=float(lam),
         )
+
+    @staticmethod
+    def support_envelope_flat(p: CPStepParameters) -> np.ndarray:
+        """LRW support-function envelope on the (flattened) grid:
+            U(x) = mean(x) + max_k { mu_k^T phi(x) + r_k (phi(x)^T Sigma_k phi(x))^{1/2} } + eps.
+        Falls back to the legacy box form only if support-function params are absent.
+        Returns a flat (D,) vector."""
+        phi = np.asarray(p.phi_basis, dtype=np.float64)        # (pe, D)
+        mean_vec = np.asarray(p.mean, dtype=np.float64).reshape(-1)  # (D,)
+        eps = float(p.epsilon)
+        if p.means is None or p.sigmas is None or p.radii is None:
+            coeff = np.asarray(p.coeff_upper, dtype=np.float64).reshape(-1)
+            return (mean_vec + phi.T @ coeff + eps).astype(np.float32)
+        means = np.asarray(p.means, dtype=np.float64)          # (K, pe)
+        sigmas = np.asarray(p.sigmas, dtype=np.float64)        # (K, pe, pe)
+        radii = np.asarray(p.radii, dtype=np.float64)          # (K,)
+        lin = means @ phi                                      # (K, D)
+        M = np.einsum("kpq,qd->kpd", sigmas, phi)              # (K, pe, D)
+        quad = np.clip(np.einsum("pd,kpd->kd", phi, M), 0.0, None)  # (K, D)
+        U_kd = lin + radii[:, None] * np.sqrt(quad)            # (K, D)
+        return (mean_vec + U_kd.max(axis=0) + eps).astype(np.float32)
 
     def _compute_upper_for_idx(self, t_idx: int) -> np.ndarray:
         p = self._extract_params_for_idx(t_idx)
-        D = int(p.phi_basis.shape[1])
-        AT = p.phi_basis.T  # (D, p_eff)
-        mean_vec = np.asarray(p.mean, dtype=np.float32).reshape(D,)
-
-        g_upper_vec = mean_vec + AT @ p.coeff_upper
-        g_upper_vec = g_upper_vec + float(p.epsilon)
         grid_shape = self._extract_shapes()
-        return self._unflatten(g_upper_vec.astype(np.float32), grid_shape)
+        return self._unflatten(self.support_envelope_flat(p), grid_shape)
 
     # ---------- public APIs ----------
 
@@ -521,12 +567,7 @@ class PCAGMMResidualCP:
         grid_shape = self._extract_shapes()
 
         def one(p: CPStepParameters) -> np.ndarray:
-            D = int(p.phi_basis.shape[1])
-            AT = p.phi_basis.T  # (D, p_eff)
-            mean_vec = np.asarray(p.mean, dtype=np.float32).reshape(D,)
-            coeff = np.asarray(p.coeff_upper, dtype=np.float32).reshape(-1)
-            g_upper_vec = mean_vec + AT @ coeff + float(p.epsilon)
-            return self._unflatten(g_upper_vec.astype(np.float32), grid_shape)
+            return self._unflatten(self.support_envelope_flat(p), grid_shape)
 
         results = Parallel(n_jobs=self.cfg.n_jobs, backend=self.cfg.backend)(
             delayed(one)(p) for p in params_list

@@ -11,8 +11,29 @@ import time
 
 import numpy as np
 
-from cp.functional_cp import CPStepParameters
+from cp.functional_cp import CPStepParameters, PCAGMMResidualCP
 from utils import build_grid, distance_field_points
+
+
+def _support_envelope_at(p: CPStepParameters, idx: np.ndarray) -> np.ndarray:
+    """LRW support-function envelope U_i evaluated at the flat grid indices `idx`:
+        U(x) = mean(x) + max_k{ mu_k^T phi(x) + r_k (phi(x)^T Sigma_k phi(x))^{1/2} } + eps.
+    Falls back to the legacy box form only if support params are absent.
+    `idx`: (m,) int indices into the flattened grid; returns (m,)."""
+    phi = np.asarray(p.phi_basis, dtype=np.float64)[:, idx]   # (pe, m)
+    mean_vec = np.asarray(p.mean, dtype=np.float64).reshape(-1)[idx]  # (m,)
+    eps = float(p.epsilon)
+    if p.means is None or p.sigmas is None or p.radii is None:
+        coeff = np.asarray(p.coeff_upper, dtype=np.float64).reshape(-1)
+        return (mean_vec + coeff @ phi + eps).astype(np.float32)
+    means = np.asarray(p.means, dtype=np.float64)            # (K, pe)
+    sigmas = np.asarray(p.sigmas, dtype=np.float64)          # (K, pe, pe)
+    radii = np.asarray(p.radii, dtype=np.float64)            # (K,)
+    lin = means @ phi                                        # (K, m)
+    Mq = np.einsum("kpq,qm->kpm", sigmas, phi)               # (K, pe, m)
+    quad = np.clip(np.einsum("pm,kpm->km", phi, Mq), 0.0, None)  # (K, m)
+    U = lin + radii[:, None] * np.sqrt(quad)                 # (K, m)
+    return (mean_vec + U.max(axis=0) + eps).astype(np.float32)
 
 
 class CPOnlineAdapter:
@@ -63,24 +84,40 @@ class CPOnlineAdapter:
         self.anchor_x = flat_x[anchor_idx]
         self.anchor_y = flat_y[anchor_idx]
         self.n_anchors = int(anchor_idx.size)
-        # Rescale the anchor sum back to the full-grid sum so the online coeff stays
-        # on the same scale as the offline coeff_upper it is compared against.
-        self.proj_scale = float(self.vector_size) / float(self.n_anchors)
         self._phi_anchor = [
-            np.asarray(p.phi_basis, dtype=np.float32)[:, anchor_idx] for p in self.base_params
+            np.asarray(p.phi_basis, dtype=np.float64)[:, anchor_idx] for p in self.base_params
         ]
         self._mean_anchor = [
-            np.asarray(p.mean, dtype=np.float32).reshape(-1)[anchor_idx] for p in self.base_params
+            np.asarray(p.mean, dtype=np.float64).reshape(-1)[anchor_idx] for p in self.base_params
         ]
+        self._eps = [float(p.epsilon) for p in self.base_params]
 
         self.target_violation = float(target_violation)
         self.eta = float(eta)
         self.warmup_frames = max(0, int(warmup_frames))
-        self.coeff_limits = (float(coeff_limits[0]), float(coeff_limits[1]))
+        self.scale_limits = (0.2, 5.0)
 
-        self.current_coeffs: List[np.ndarray] = [
-            np.asarray(p.coeff_upper, dtype=np.float32).copy() for p in self.base_params
+        # Scalar ACI knob: a single per-horizon multiplier on the calibrated radii r_{k,i}
+        # (a lambda surrogate). Online we adapt this ONE scalar, not a per-coordinate
+        # vector; the LRW support-function envelope is recomputed from the cached
+        # {mu_k, Sigma_k} with the scaled radii. lin/B at the anchors are fixed offline.
+        self.base_radii: List[Optional[np.ndarray]] = [
+            (np.asarray(p.radii, dtype=np.float64) if p.radii is not None else None)
+            for p in self.base_params
         ]
+        self.scale: List[float] = [1.0 for _ in self.base_params]
+        self._lin_anchor: List[Optional[np.ndarray]] = []
+        self._B_anchor: List[Optional[np.ndarray]] = []
+        for p, phi_a in zip(self.base_params, self._phi_anchor):
+            if p.means is None or p.sigmas is None or p.radii is None:
+                self._lin_anchor.append(None); self._B_anchor.append(None); continue
+            means = np.asarray(p.means, dtype=np.float64)        # (K, pe)
+            sig = np.asarray(p.sigmas, dtype=np.float64)         # (K, pe, pe)
+            lin = means @ phi_a                                  # (K, M)
+            Mq = np.einsum("kpq,qm->kpm", sig, phi_a)
+            quad = np.clip(np.einsum("pm,kpm->km", phi_a, Mq), 0.0, None)
+            self._lin_anchor.append(lin)
+            self._B_anchor.append(np.sqrt(quad))                 # (K, M)
 
         self.pending_preds: Dict[int, Dict[int, List[np.ndarray]]] = defaultdict(lambda: defaultdict(list))
 
@@ -103,11 +140,8 @@ class CPOnlineAdapter:
             field = self._build_residual_field(pred_pts, actual_pts)
             if field is None:
                 continue
-            coeff = self._project_coefficients(step_idx, field)
-            if coeff is None:
-                continue
             if frame_idx >= self.warmup_frames:
-                updated |= self._apply_update(step_idx, coeff)
+                updated |= self._apply_update_scalar(step_idx, field)
 
         self._cleanup(frame_idx)
         return updated
@@ -117,7 +151,8 @@ class CPOnlineAdapter:
         for p in self.base_params:
             idx = self.idx_map[int(p.t_idx)]
             q = copy.deepcopy(p)
-            q.coeff_upper = self.current_coeffs[idx].copy()
+            if self.base_radii[idx] is not None:
+                q.radii = (self.scale[idx] * self.base_radii[idx]).astype(np.float32)
             params.append(q)
         return params
 
@@ -174,32 +209,28 @@ class CPOnlineAdapter:
         sdf_true = distance_field_points(true_rel, self.anchor_x, self.anchor_y)
         return (sdf_pred - sdf_true).astype(np.float32)
 
-    def _project_coefficients(self, step_idx: int, field: np.ndarray) -> Optional[np.ndarray]:
+    def _apply_update_scalar(self, step_idx: int, field: np.ndarray) -> bool:
+        """ACI on a single scalar radius-multiplier per horizon, driven by the
+        *functional* violation indicator: did the realized residual exceed the current
+        envelope at ANY anchor?  scale <- clip(scale + eta (viol - target_violation)).
+        Bigger violations -> larger radii -> larger envelope (drives long-run miscoverage
+        to target_violation; cf. Eq. (acp_update))."""
         idx = self.idx_map.get(int(step_idx))
-        if idx is None:
-            return None
-        vec = np.asarray(field, dtype=np.float32).reshape(-1)
+        if idx is None or self.base_radii[idx] is None:
+            return False
+        vec = np.asarray(field, dtype=np.float64).reshape(-1)
         if vec.shape[0] != self.n_anchors:
-            return None
-        # Anchor-restricted projection, rescaled to the full-grid coefficient scale.
-        centered = vec - self._mean_anchor[idx]
-        coeff = self.proj_scale * (self._phi_anchor[idx] @ centered)
-        return coeff.astype(np.float32)
-
-    def _apply_update(self, step_idx: int, coeff: np.ndarray) -> bool:
-        idx = self.idx_map.get(int(step_idx))
-        if idx is None:
             return False
-
-        current = self.current_coeffs[idx]
-        indicator = (np.abs(coeff) > current).astype(np.float32)
-        delta = self.eta * (indicator - self.target_violation)
-        if not np.any(np.abs(delta) > 1e-6):
+        r = self.scale[idx] * self.base_radii[idx]                      # (K,)
+        U_anchor = (self._mean_anchor[idx]
+                    + (self._lin_anchor[idx] + r[:, None] * self._B_anchor[idx]).max(axis=0)
+                    + self._eps[idx])                                   # (M,)
+        viol = 1.0 if float(np.max(vec - U_anchor)) > 0.0 else 0.0
+        delta = self.eta * (viol - self.target_violation)
+        new = float(np.clip(self.scale[idx] + delta, self.scale_limits[0], self.scale_limits[1]))
+        if abs(new - self.scale[idx]) < 1e-9:
             return False
-
-        updated = current + delta
-        updated = np.clip(updated, self.coeff_limits[0], self.coeff_limits[1])
-        self.current_coeffs[idx] = updated.astype(np.float32)
+        self.scale[idx] = new
         return True
 
     def _cleanup(self, frame_idx: int) -> None:
@@ -416,17 +447,14 @@ class FunctionalCPMPC:
         D = H * W
         grids: List[np.ndarray] = []
 
+        all_idx = np.arange(D, dtype=np.int64)
         for p in params_list:
             phi = np.asarray(p.phi_basis, dtype=np.float32)
             if phi.shape[1] != D:
                 raise ValueError(
                     f"phi_basis dimension mismatch: expected {D}, got {phi.shape[1]}"
                 )
-            mean_vec = np.asarray(p.mean, dtype=np.float32).reshape(D,)
-            AT = phi.T  # (D, p_eff)
-
-            coeff = np.asarray(p.coeff_upper, dtype=np.float32).reshape(-1)
-            g_upper_vec = mean_vec + AT @ coeff + float(p.epsilon)
+            g_upper_vec = _support_envelope_at(p, all_idx)  # LRW support function
             grids.append(g_upper_vec.reshape(H, W))
 
         return np.stack(grids, axis=0).astype(np.float32)
@@ -473,14 +501,9 @@ class FunctionalCPMPC:
 
         j = np.rint(u[inside]).astype(np.int32)
         i = np.rint(v[inside]).astype(np.int32)
-        idx = (i * self.grid_W + j).astype(np.int32)
+        idx = (i * self.grid_W + j).astype(np.int64)
 
-        phi = p.phi_basis[:, idx].astype(np.float32, copy=False)
-        coeff = p.coeff_upper.astype(np.float32, copy=False)
-        mean_vec = np.asarray(p.mean, dtype=np.float32).reshape(-1)
-        mean_vals = mean_vec[idx]
-        Ui = (mean_vals + coeff @ phi + float(p.epsilon)).astype(np.float32)
-        out[inside] = Ui
+        out[inside] = _support_envelope_at(p, idx)  # LRW support function
         return out
 
     def _lookup_from_grid(self, pos_world: np.ndarray, t_idx: int) -> np.ndarray:

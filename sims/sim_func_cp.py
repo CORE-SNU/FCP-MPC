@@ -271,7 +271,7 @@ def run_fcp_mpc(
     n_skip = 2
     n_paths = 1200
 
-    p_base = 6
+    p_base = 5
     k_mix = 7
     test_size = 0.30
     random_state = 0

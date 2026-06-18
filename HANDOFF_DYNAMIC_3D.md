@@ -308,3 +308,48 @@ when >1 seed; bolding still compares means). Ctrl-time stays a single pooled mea
 
 **2D std:** intentionally NOT added — only n=3 scenes/dataset (univ n=1), so std is too
 noisy to be meaningful; the coverage table already carries ±std (see `make_coverage_table.py`).
+
+---
+
+## 6) FCP envelope rewrite — re-run 3D with the corrected (LRW support-function) envelope
+
+**Why (committed this session):** the offline envelope was a per-coordinate *box*
+`mean + φ^T ξ̂ + ε` that ignored the sign of the FPCA basis (NOT a valid upper bound where
+`φ_j(x)<0`). It is now the **LRW support function** (Lei–Rinaldo–Wasserman Eq. (8)–(9),
+matching the paper Appendix):
+```
+U_i(x) = ε_i + max_k { μ_k^T φ_i(x) + r_k ( φ_i(x)^T Σ_k φ_i(x) )^{1/2} }.
+```
+Also: `CPConfig.split_alpha=False` (each conformal step at level α, not α/2 → less
+conservative), lower-tail λ quantile (`Quantile_α`, was wrongly `1−α/2`), and **`p_base=5`**
+everywhere (diagnostic: higher p ⇒ *more* conservative support function; ε is small and
+≈p-independent, so 5 is a good middle and consistent with the L3 "5–7 PCs" story).
+
+**Code changed (in this commit):**
+- `cp/functional_cp.py`: `support_envelope_flat`; new `CPStepParameters` fields
+  `{means,sigmas,radii,weights,lam}`; `split_alpha=False`; lower-tail λ.
+- `controllers/func_cp_mpc.py` (2D): support-function grid + per-point eval; **online AFCP
+  reworked to a scalar radius-multiplier `c` via ACI on the functional-violation indicator**
+  (was a per-coordinate ξ̂ update).
+- `controllers/func_3d_mpc.py` (3D): support-function grid + per-point eval. **3D is
+  offline-only**, so its legacy per-coordinate online adapter is unused; if you ever enable
+  3D online adaptation, port the scalar-`c` rule from `func_cp_mpc.py` (the current 3D adapter
+  would be a no-op, since the grid is built from `{μ,Σ,r}`, not `coeff_upper`).
+- `p_base=5`: `sim_func_3d.py` (L428, L760), `sims/sim_func_cp.py`, `multi_pedestrians_cp.py`.
+
+**ACTION (desktop, full 17-seed):**
+1. `git pull`; env `cp`.
+2. **Invalidate stale envelope caches first** (old caches hold the box envelope):
+   `rm -f predictions/*_p*_k*.pkl` and any cached CP envelope `*.pkl`. (2D caches at
+   `sims/sim_func_cp.py` ~L310; 3D `sim_func_3d.py` does not appear to cache, but clear to be safe.)
+3. Re-run `python make_3d_results.py` (dense, 17 seeds → `table_3d_results.tex` with the
+   **new envelope + ±std**) and `run_sparse_3d.py` + the scalability sweep.
+4. Numbers WILL shift (envelope is different and now valid; p=6/4→5). Sanity: FCP should still
+   reach the goal; the support-function envelope is somewhat more conservative than the old
+   (buggy) box, so infeasible may rise — that is expected/honest, and the soft variant + the
+   online scalar-`c` adaptation are what claw it back. Report the new numbers.
+5. Regenerate envelope-dependent 3D figures (`Func_cp_3d_zoom`, `traj_3d_seeds`,
+   `control_time_3d`) and update the two table captions to "mean $\pm$ std over 17 seeds".
+
+**Note:** ICS is removed (safety radius is plain `r_safe`). The commented-out Math-Setup
+blocks in `main.tex` are NOT to be touched here (owner is reconciling them separately).

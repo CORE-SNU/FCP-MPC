@@ -9,6 +9,7 @@ import numpy as np
 import time
 
 from cp.functional_cp import CPStepParameters
+from controllers.func_cp_mpc import _support_envelope_at
 
 
 def _build_grid_from_axes(xs: np.ndarray, ys: np.ndarray, zs: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -389,13 +390,12 @@ class FunctionalCPMPC3D:
         D = int(nz * ny * nx)
         grids: List[np.ndarray] = []
 
+        all_idx = np.arange(D, dtype=np.int64)
         for p in params_list:
             phi = np.asarray(p.phi_basis, dtype=np.float32)
             if phi.shape[1] != D:
                 raise ValueError(f"phi_basis dimension mismatch: expected {D}, got {phi.shape[1]}")
-            mean_vec = np.asarray(p.mean, dtype=np.float32).reshape(D,)
-            coeff = np.asarray(p.coeff_upper, dtype=np.float32).reshape(-1)
-            g_upper_vec = mean_vec + phi.T @ coeff + float(p.epsilon)
+            g_upper_vec = _support_envelope_at(p, all_idx)  # LRW support function
             grids.append(g_upper_vec.reshape(nz, ny, nx))
 
         return np.stack(grids, axis=0).astype(np.float32)
@@ -406,12 +406,9 @@ class FunctionalCPMPC3D:
             return self.default_U * np.ones((pos_world.shape[0],), dtype=np.float32)
 
         ijk_float, valid = self._world_to_grid_ijk_float_batch(pos_world)
-        idx = self._grid_flat_index_batch(ijk_float)
+        idx = self._grid_flat_index_batch(ijk_float).astype(np.int64)
 
-        phi = p.phi_basis[:, idx].astype(np.float32, copy=False)
-        coeff = p.coeff_upper.astype(np.float32, copy=False)
-        mean_vec = np.asarray(p.mean, dtype=np.float32).reshape(-1)
-        Ui = (mean_vec[idx] + coeff @ phi + float(p.epsilon)).astype(np.float32)
+        Ui = _support_envelope_at(p, idx)  # LRW support function
 
         out = np.full((pos_world.shape[0],), float(self.default_U), dtype=np.float32)
         out[valid] = Ui[valid]
