@@ -192,9 +192,11 @@ class EgocentricCPMPC3D:
         self.n_paths = int(n_paths)
         self.rng = np.random.default_rng(int(seed))
 
-        # ACI alpha_t: (n_paths, n_steps)
+        # Global per-horizon ACI level (one scalar per horizon step), shared across candidates.
+        # Per-path alpha_t is ill-defined under MPPI resampling (paths redrawn each step), so a
+        # single alpha_t[i] is the correct egocentric ACI under resampling (see 2D ecp_mpc.py).
         self._miscoverage_level = float(miscoverage_level)
-        self.alpha_t = self._miscoverage_level * np.ones((self.n_paths, self.n_steps), dtype=np.float32)
+        self.alpha_t = self._miscoverage_level * np.ones(self.n_steps, dtype=np.float32)
         self._gamma = float(step_size)
 
         self.calibration_set_size = int(calibration_set_size)
@@ -225,7 +227,7 @@ class EgocentricCPMPC3D:
         obs_history: dict(pid -> (L,3)) (trajectories)
         returns err: (P,T) miscoverage indicator used in ACI update
         """
-        n_paths = self.alpha_t.shape[0]
+        n_paths = self.n_paths
 
         if not obs_history:
             self._track_queue.append({})
@@ -285,7 +287,7 @@ class EgocentricCPMPC3D:
             err = (quantiles < (min_dist_pred - min_dist_obs)).astype(np.float32)  # (P,L)
 
             # ACI update
-            self.alpha_t[:, :max_n_steps - 1] += self._gamma * (self._miscoverage_level - err)
+            self.alpha_t[:max_n_steps - 1] += self._gamma * (self._miscoverage_level - err.mean(axis=0))
 
             # pad to (P,T) for consistent return
             if (max_n_steps - 1) < self.n_steps:
@@ -362,7 +364,7 @@ class EgocentricCPMPC3D:
 
             scores = np.clip(min_dist_pred - min_dist_obs, a_min=0.0, a_max=None)  # (P,T,B)
 
-            levels = 1.0 - self.alpha_t  # (P,T)
+            levels = 1.0 - np.tile(self.alpha_t, (scores.shape[0], 1))  # global per-step level -> (P,T)
             quantiles = quantile_higher_per_entry(scores, levels)  # (P,T)
 
             # same spirit as 2D: cap inf quantiles by a growing bound

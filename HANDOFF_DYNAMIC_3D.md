@@ -29,19 +29,33 @@ The FCP envelope was rewritten and is now shared by 2D and 3D:
 - **p_base = 5** everywhere (diagnostic: higher p ⇒ *more* conservative support function; ε is
   small and ≈p-independent; 5 is a good middle, consistent with the L3 "5–7 PCs" story).
 
-## Action (desktop, full 17-seed)
+## Action (desktop) — don't re-run the full 5×17 suite
+
+Only two things changed: the **FCP envelope** (→ FCP only) and the **ECP per-horizon ACI**
+(→ ECP only). CC and ACP are untouched, so reuse their existing cache. Use the decoupled
+`run_subset_3d.py` (groups: `baseline`={ACP,CC,ECP}, `fcp`={FCP hard,soft}; 17 seeds each) +
+`assemble_3d.py`.
+
 1. `git pull`; env `cp`.
 2. **Invalidate stale envelope caches first** (old caches hold the box envelope / old p):
    `rm -f sims/cp_cache/*.pkl` and any 3D CP cache `*.pkl`.
-3. Re-run the dense suite: `python make_3d_results.py` → regenerates
-   `T_RO2026/table_3d_results.tex` with the **new envelope + clearance relaxation + mean±std**, plus
-   `metric_3d/results_3d.{csv,json}`. Then `run_sparse_3d.py` + the scalability sweep.
-   - `make_3d_results.py::write_latex_table` already emits `mean±std` (collision, infeasible,
-     steps); mirror it in the sparse-table writer if that path doesn't share the code.
-4. Numbers will shift (valid + larger envelope, p→5, clearance relaxation). Sanity-check: FCP should reach the
-   goal; report new collision/infeasible/steps/ctrl. The clearance relaxation should keep hard
-   feasible (in 2D it dropped hard infeasible from ~0.85 to ~0.2–0.6).
-5. Regenerate envelope-dependent 3D figures (`Func_cp_3d_zoom`, `traj_3d_seeds`,
+3. **Required — FCP only** (the actual contribution; envelope changed):
+   `python run_subset_3d.py --which fcp`  → `fcp_3d_cache.pkl`.
+   Then `python assemble_3d.py` to combine with the existing `baseline_3d_cache.pkl`
+   (CC/ACP/ECP from before) → `T_RO2026/table_3d_results.tex` (mean±std), `metric_3d/results_3d.{csv,json}`.
+   This alone is ~2/5 of the full suite.
+4. **ECP fairness (optional for the 3D headline).** The ECP ACI was just fixed (per-path→global
+   per-horizon, same bug/fix as 2D `ecp_mpc.py`). ECP is bundled in the `baseline` group, so to
+   refresh it run `python run_subset_3d.py --which baseline` (re-runs ACP/CC/ECP; ACP/CC come out
+   identical). **But:** in 3D, ECP already fails on **compute** (~306 ms ≫ the 100 ms Δt budget),
+   and the ACI fix changes plan quality, **not** compute cost — so ECP's 3D headline (too slow /
+   infeasible-by-budget) is unchanged. Re-run `baseline` only if you want the *fair*
+   collision/infeasible numbers reported; the conclusion holds either way. (The ACI fix mainly
+   matters for the **2D** comparison, where ECP runs within budget — already re-run on the laptop.)
+5. Numbers will shift (valid + larger envelope, p→5, clearance relaxation). Sanity-check: FCP should
+   reach the goal; the clearance relaxation should keep hard feasible (in 2D it dropped hard
+   infeasible from ~0.85 to ~0.2–0.6).
+6. Regenerate envelope-dependent 3D figures (`Func_cp_3d_zoom`, `traj_3d_seeds`,
    `control_time_3d`) and set the two 3D table captions to "mean $\pm$ std over 17 seeds".
 
 ## Notes
