@@ -522,7 +522,7 @@ The central idea is to conformalize the safety bound over the \emph{entire field
 Since the conformalized bound lives in a compact functional (coefficient) form, the expensive computation---fitting the basis and an accurate \emph{initial} bound from a large calibration set through a GMM-based functional conformal procedure---is carried out once, offline, and cached.
 Online, the planner no longer recomputes per-point distances; it simply consults this precomputed field, projecting the realized residuals onto the cached basis and applying a lightweight update.
 Two benefits follow: the per-step cost stays well within real-time budgets, and the planner is handed a continuous, queryable safety field---directly suited to scoring the many candidate trajectories of an MPC rollout.
-The same update also absorbs the distribution shift that arises once the deployed error distribution drifts from the offline data, correcting it within the low-dimensional coefficient space rather than re-fitting the entire field (Section~\ref{subsec:online_update}).
+The same update also absorbs the distribution shift that arises once the deployed error distribution drifts from the offline data, correcting it through a lightweight scalar adjustment, without re-fitting the entire field (Section~\ref{subsec:online_update}).
 Figure~\ref{fig:overview} summarizes the resulting pipeline.
 
 \begin{figure}[t]
@@ -562,10 +562,10 @@ Figure~\ref{fig:overview} summarizes the resulting pipeline.
   \end{tikzpicture}}
   \caption{Overview of the proposed functional CP-informed MPC.
   \textbf{Offline} (blue): predicted and realized signed-distance fields are reduced by
-  FPCA and a GMM-based inductive conformal procedure into a cached coefficient-envelope
+  FPCA and a GMM-based inductive conformal procedure into a cached envelope
   tuple $\Pi_i$.
   \textbf{Online} (red): the realized residual is projected onto the cached basis, the
-  coefficient upper bound is adapted by the AFCP rule~\eqref{eq:acp_update}, and the
+  envelope radii are rescaled by the AFCP rule~\eqref{eq:acp_update}, and the
   resulting envelope $\widetilde U_{i,t}$ tightens the sampled-MPC safety filter.
   In the open 3D setting the online branch is unnecessary---ample free space makes the
   offline hard envelope sufficient---whereas the dense 2D benchmarks additionally exploit
@@ -763,8 +763,8 @@ Then, we apply FPCA to obtain an orthonormal basis
 This in turn produces the coefficient vector of each $S \in \mathcal{D}_{\text{cal}, i}$ according to~\eqref{eq:coefficient}.
 
 The key design principle is to separate the field-level \emph{statistical initialization}, computed once offline, from the \emph{lightweight adaptation} performed online.
-Offline, we exploit a large calibration set and a flexible GMM to construct the most accurate initial coefficient upper bound possible; this cost is paid only once, before deployment.
-Online, the GMM is no longer evaluated---the controller adapts the cached upper bound directly from streaming residual observations and a prescribed target violation level, so the per-step cost stays small.
+Offline, we exploit a large calibration set and a flexible GMM to construct the most accurate initial envelope possible; this cost is paid only once, before deployment.
+Online, the GMM is not evaluated; the controller adapts the cached envelope directly from streaming residual observations and a prescribed target violation level, so the per-step cost stays small.
 
 \paragraph{Time-to-go indexing.}
 For each horizon index $i\in\{1,\dots,N\}$, we define the residual field
@@ -810,7 +810,7 @@ U_i^{(0)}(x)
 \label{eq:Ui_init}
 \end{equation}
 where $\varphi_i(x)\in\mathbb R^{p_i}$ denotes the vector of basis evaluations at $x$.
-(The support function automatically takes the worst-case direction over each ellipsoid, so it is a valid upper bound regardless of the sign of the basis functions; a single per-coordinate vector would not be.)
+Each mixture component contributes its worst-case directional extent over the corresponding ellipsoid, so $U_i^{(0)}$ upper-bounds the residual field at every point.
 
 \paragraph{Cached offline tuple.}
 For each horizon index $i$, we cache the offline tuple
@@ -834,7 +834,7 @@ the full collection of horizon-indexed tuples cached by the controller.
 Crucially, after deployment the online controller only \emph{evaluates} the closed-form envelope~\eqref{eq:Ui_init} from the cached parameters and never \emph{re-fits} the GMM. In practice the two grids $\widehat\mu_{i,k}^\top\varphi_i(\cdot)$ and $(\varphi_i(\cdot)^\top\widehat\Sigma_{i,k}\varphi_i(\cdot))^{1/2}$ are precomputed once, so an envelope update reduces to recombining them with the (scalar-)adapted radii.
 
 \subsection{Stage 2: Online Adaptation}\label{subsec:online_update}
-Once the robot starts moving, the cached envelope is adapted online through a single scalar per horizon index, in the spirit of adaptive conformal inference~\cite{gibbs2021adaptiveconformalinferencedistribution}. Because the offline envelope~\eqref{eq:Ui_init} is parameterized by the calibrated radii $r_{i,k}$, we adapt a scalar multiplier $c_i^{(t)}$ on those radii rather than a high-dimensional coefficient vector: this keeps the band a valid LRW support function at all times and yields a clean coverage event.
+Once the robot starts moving, the cached envelope is adapted online through a single scalar per horizon index, in the spirit of adaptive conformal inference~\cite{gibbs2021adaptiveconformalinferencedistribution}. Because the offline envelope~\eqref{eq:Ui_init} is parameterized by the calibrated radii $r_{i,k}$, we adapt a single scalar multiplier $c_i^{(t)}$ on those radii: this keeps the band a valid envelope at all times and yields a clean coverage event.
 At time $t$, once a realized residual field $S^{\mathrm{on}}_{i,t}$ matures for horizon index $i$, we form the \emph{functional} violation indicator
 \begin{equation}
 \mathrm{err}^{(t)}_i = \mathbb{I}\!\left[\exists x\in\bar{\mathcal X}:\ S^{\mathrm{on}}_{i,t}(x) > \widetilde U_{i,t}(x)\right],
@@ -877,12 +877,12 @@ and accepts the trajectory only if $\mathrm{x}^{(k)}_{t+i|t}\in\mathcal S^{\math
 {\bf Note on Computational Implications.}
 This decomposition has two important consequences.
 First, the computationally expensive statistical modeling is performed only once offline, where large-scale data and a flexible GMM can be used to obtain an accurate initialization.
-Second, the online controller avoids all GMM computations and updates only the low-dimensional coefficient upper bound $\hat{\xi}^{(t)}_i$, which substantially reduces online overhead and better matches real-time operation.
+Second, the online controller avoids all GMM computations and updates only a single scalar multiplier $c_i^{(t)}$ per horizon index, which substantially reduces online overhead and better matches real-time operation.
 
 Algorithm~\ref{alg:fcp_mpc_acp} summarizes the resulting procedure.
 
 \begin{algorithm}[t]
-\caption{Functional CP-informed MPC with offline GMM initialization and online coefficient-space adaptive update}
+\caption{Functional CP-informed MPC with offline GMM initialization and optional online adaptive update}
 \label{alg:fcp_mpc_acp}
 \begin{algorithmic}[1]
 \STATE \textbf{Input:} Calibration set $\{\mathcal D_{\mathrm{cal},i}\}_{i=1}^N$, safety radius $r_{\mathrm{safe}}$, tracking margin $\epsilon$, target violation level $\alpha_{\mathrm{target}}$, workspace grid $\mathcal G$.
@@ -891,9 +891,9 @@ Algorithm~\ref{alg:fcp_mpc_acp} summarizes the resulting procedure.
     \STATE Compute residual-field samples $S_i^{(j)}(x)=D_{t+i|t}^{(j)}(x)-D_{t+i}^{(j)}(x)$;
     \STATE Apply FPCA and extract basis $\{\varphi_{i,m}\}_{m=1}^{p_i}$;
     \STATE Project all residual fields to obtain coefficient vectors $\xi_i^{(j)}$;
-    \STATE Fit a GMM in coefficient space and compute the initial coefficient upper bound $\hat{\xi}^{(0)}_i$;
+    \STATE Fit a GMM in coefficient space and conformalize to obtain mixture parameters $\{\widehat\pi_{i,k},\widehat\mu_{i,k},\widehat\Sigma_{i,k}\}$ and radii $\{r_{i,k}\}$;
     \STATE Compute the projection residual $\varepsilon_i$;
-    \STATE Cache the tuple $\Pi_i=(\{\varphi_{i,m}\}_{m=1}^{p_i},\hat{\xi}^{(0)}_i,\varepsilon_i)$;
+    \STATE Cache the tuple $\Pi_i$~\eqref{eq:Pi_i_tuple};
 \ENDFOR
 \STATE Retain only the cached tuples $\{\Pi_i\}_{i=1}^N$; the GMM is not used online.
 \STATE \textbf{Online MPC loop} (online adaptation optional):
@@ -901,11 +901,11 @@ Algorithm~\ref{alg:fcp_mpc_acp} summarizes the resulting procedure.
     \STATE Observe current robot state $z_t$ and obtain obstacle predictions $\{\widehat{\mathcal O}_{t+i|t}\}_{i=1}^N$;
     \FOR{each horizon index $i$ for which an online residual field $S^{\mathrm{on}}_{i,t}$ becomes available}
         \STATE Project $S^{\mathrm{on}}_{i,t}$ onto the cached basis and compute $\xi^{\mathrm{on}}_{i,t}$;
-        \STATE Update the coefficient upper bound $\hat{\xi}^{(t+1)}_i$ \eqref{eq:acp_update};
+        \STATE Update the scalar radius multiplier $c_i^{(t+1)}$~\eqref{eq:acp_update};
 
     \ENDFOR
     \STATE Sample candidate input sequences and roll out candidate trajectories;
-    \STATE Evaluate $\widetilde U_{i,t}(x)=\varepsilon_i+\hat{\xi}^{(t)\top}_i\varphi_i(x)$ along rollouts;
+    \STATE Evaluate the envelope $\widetilde U_{i,t}(x)$~\eqref{eq:Ui_online} along rollouts;
     \STATE Filter infeasible trajectories using $\underline D_{t+i|t}(x)\ge r_{\mathrm{safe}}+\epsilon$;
     \STATE Select the feasible candidate minimizing the MPC objective~\eqref{eq:mpc-constraint-fcp};
     \STATE Apply the first control input and advance to the next planning step;
@@ -1290,25 +1290,27 @@ datasets, and Figure~\ref{fig:traj_2d} shows representative closed-loop trajecto
 of FCP-MPC and the baselines.
 Several consistent trends emerge across all environments.
 
-CC-MPC has a zero infeasible rate by construction (soft penalty), but is slow---it times
-out in the most crowded scene (\texttt{univ})---and its collisions, while below nominal
-planning, remain non-negligible in dense scenes.
+CC-MPC has a zero infeasible rate by construction (soft penalty) and attains low collision
+rates, but is conservative and slow---it times out in the most crowded scenes
+(\texttt{univ}, \texttt{zara2})---trading progress for caution.
 ECP-MPC's explicit online uncertainty reasoning dominates its cost: its control time
-($42$--$78$\,ms) approaches or exceeds the planning period, inflating its infeasible rate
-and causing timeouts (\texttt{hotel}, \texttt{univ}, \texttt{zara2}), while its collision
-rate is only middling (e.g.\ $0.204$ on \texttt{univ}).
+($40$--$74$\,ms) approaches or exceeds the planning period, inflating its infeasible rate
+and causing timeouts (\texttt{eth}, \texttt{univ}, \texttt{zara2}), while its collision
+rate is only middling (e.g.\ $0.081$ on \texttt{univ}).
 ACP-MPC is cheap and attains low collisions on some scenes (e.g.\ $0.000$ on \texttt{univ}),
 but its scalar online adaptation leaves high infeasible rates and frequent timeouts in dense,
 dynamic scenes.
 
 FCP-MPC exposes a clear safety--feasibility trade-off between its two deployments of the
-same offline field. The hard variant attains the lowest collision rate where free space
-allows (e.g.\ $0.023$ on \texttt{eth}) but keeps a non-zero infeasible rate, as the
-worst-case envelope compounds over the horizon. The soft variant removes infeasibility on
+same offline field. The hard variant enforces the envelope as a feasibility filter and so
+inherits the closed-loop guarantee; collisions stay competitive in the more open scenes
+(e.g.\ $0.069$ on \texttt{eth}), but the worst-case envelope compounds over the horizon,
+leaving a non-zero infeasible rate and higher collisions in the densest scenes
+(\texttt{univ}, \texttt{zara1}). The soft variant removes infeasibility on
 every scene and gives the shortest paths (lowest steps-to-goal on all five scenes), at the
 cost of higher collisions in the densest scenes (\texttt{univ}, \texttt{zara2}). Both keep
 control time far below ECP-MPC (a few milliseconds vs.\ tens), because uncertainty is
-quantified offline and only a low-dimensional coefficient update runs online.
+quantified offline and the controller only evaluates the cached conformal field online.
 Rather than dominating every metric, FCP-MPC offers a favorable
 safety--feasibility--efficiency trade-off: the same calibrated field can be enforced
 strictly (hard) or used to shape the cost (soft) as the scene demands.
@@ -1355,23 +1357,24 @@ Lower values indicate better performance.}
 
 \paragraph{Effect of online envelope adaptation}
 
-The offline functional envelope is conformalized on held-out data and can become
-overly conservative under the distribution shift of dense, dynamic scenes,
-occasionally eliminating all feasible trajectories after hard filtering.
-The online update~\eqref{eq:acp_update} addresses this by adapting the coefficient
-upper bound $\hat{\xi}^{(t)}_i$ directly from realized residuals, without
-re-invoking the GMM.
-Table~\ref{tab:2d_ablation} isolates this effect.
-For the hard variant, online adaptation markedly reduces the infeasible
-rate---from $0.480$ to $0.265$ on \texttt{eth}, from $0.640$ to $0.383$ on
-\texttt{univ}, and from $0.454$ to $0.262$ on \texttt{zara1}---by relaxing the
-envelope where the offline bound was unnecessarily tight, while leaving collision
-rates essentially unchanged.
-For the soft variant, which is already feasible by construction, adaptation yields
-only marginal changes.
-Because the update operates on the low-dimensional coefficients evaluated on the
-discretization grid of Section~\ref{sec:score-comp}, it adds only a few milliseconds
-of online computation and stays well below the cost of ECP-MPC.
+The offline functional envelope is conformalized once on held-out data; online
+adaptation is an \emph{optional} refinement that, in the spirit of adaptive conformal
+inference, rescales the cached radii through a single scalar $c_i^{(t)}$ per horizon
+index via~\eqref{eq:acp_update}, driving the realized miscoverage toward
+$\alpha_{\text{target}}$ without re-fitting the GMM.
+Table~\ref{tab:2d_ablation} isolates its effect, and the changes are small and mixed.
+The hard-constraint collision rate improves on some scenes (e.g.\ \texttt{zara1}
+$0.204\!\to\!0.191$, \texttt{zara2} $0.203\!\to\!0.191$) and worsens on others
+(\texttt{hotel} $0.080\!\to\!0.191$), while the hard infeasible rate is essentially
+unchanged to marginally higher (e.g.\ \texttt{eth} $0.589\!\to\!0.625$, \texttt{zara1}
+$0.341\!\to\!0.388$); the soft variant, already feasible by construction, shifts only
+slightly.
+Because the update merely recombines the precomputed grids of
+Section~\ref{sec:score-comp}, it adds only a few milliseconds per step and stays well
+below the cost of ECP-MPC.
+On this benchmark, then, the offline-calibrated envelope already does the heavy lifting,
+and online adaptation is a low-cost option---valuable chiefly as a hedge against
+distribution shift---rather than a necessity.
 
 \subsection{3D Quadrotor Navigation}
 Table~\ref{tab:pybullet_results} reports closed-loop results at $M=280$ dynamic
@@ -1550,7 +1553,7 @@ controller. By conformalizing uncertainty at the level of the spatial \emph{fiel
 rather than at individual states or trajectories---the method reasons about safety
 globally and coherently, and its offline--online decomposition keeps the per-step
 computation low: a GMM-based envelope is fitted offline, while online only a
-low-dimensional coefficient vector is refined by a lightweight adaptive update. We
+single scalar per horizon index is refined by a lightweight adaptive update. We
 established asymptotic closed-loop safety both under exchangeability and, through
 the online adaptation, under distribution shift.
 
