@@ -28,7 +28,8 @@ def main():
 
     D.METHOD_LABELS = list(D.TABLE_ORDER)  # all five for table/figures
 
-    clean = D.clean_ctrl_by_method(timing, D.ENV_KWARGS and 280)
+    N_OBS_MAIN = 280
+    clean = D.clean_ctrl_by_method(timing, N_OBS_MAIN)
     D.write_table(main_results, clean, seeds)   # -> table_3d_results.tex (mean±std)
     D.write_scalability(timing)
 
