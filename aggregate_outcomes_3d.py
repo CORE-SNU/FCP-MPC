@@ -65,30 +65,35 @@ def build_table(results, density):
             reached_rate=float(np.mean([m["reached_goal"] for m in rs])),
         )
 
-    def _best(key):
-        vals = {k: v[key] for k, v in rows.items()
-                if v.get(key) is not None and not (isinstance(v[key], float) and np.isnan(v[key]))}
-        return min(vals, key=vals.get) if vals else None
+    def _colmin(key):
+        vals = [v[key] for v in rows.values()
+                if v.get(key) is not None and not (isinstance(v[key], float) and np.isnan(v[key]))]
+        return min(vals) if vals else None
 
-    best_infeas, best_ctrl = _best("infeas"), _best("ctrl")
-    best_steps = _best("steps_val")
-    _creach = {k: v["coll"] for k, v in rows.items() if v["steps_val"] is not None}
-    best_coll = min(_creach, key=_creach.get) if _creach else None
+    # Column-best = the genuine min over ALL methods (the Goal-reached column now
+    # contextualizes a low collision rate that comes paired with a crash). Ties are
+    # all bolded.
+    best_coll, best_infeas, best_ctrl = _colmin("coll"), _colmin("infeas"), _colmin("ctrl")
+    best_steps = _colmin("steps_val")
     best_reach = max((v["reached_rate"] for v in rows.values()), default=0.0)
 
-    def _f(label, key, fmt, is_best):
+    def _isbest(v, best):
+        return (best is not None and isinstance(v, (int, float)) and not np.isnan(v)
+                and abs(v - best) < 1e-9)
+
+    def _f(label, key, fmt, best):
         v = rows[label][key]
         if isinstance(v, float) and np.isnan(v):
             return "--"
         s = fmt.format(v)
-        return rf"\textbf{{{s}}}" if is_best else s
+        return rf"\textbf{{{s}}}" if _isbest(v, best) else s
 
-    def _fpm(label, key, nd, is_best):
+    def _fpm(label, key, nd, best):
         m = rows[label][key]
         sd = rows[label].get(key + "_std")
         body = f"{m:.{nd}f}" if (sd is None or rows[label]['n'] <= 1) else f"{m:.{nd}f}\\pm{sd:.{nd}f}"
         s = f"${body}$"
-        return rf"\textbf{{{s}}}" if is_best else s
+        return rf"\textbf{{{s}}}" if _isbest(m, best) else s
 
     lines = [r"\begin{tabular}{lccccc}", r"\hline",
              "Method &", r"Collision rate $\downarrow$ &",
@@ -98,18 +103,19 @@ def build_table(results, density):
         if label not in rows:
             continue
         r = rows[label]
-        steps = (rf"\textbf{{{r['steps_str']}}}" if label == best_steps else r["steps_str"])
+        steps = (rf"\textbf{{{r['steps_str']}}}"
+                 if _isbest(r["steps_val"], best_steps) else r["steps_str"])
         infeas_cell = ("N/A" if r["infeas"] is None
-                       else _fpm(label, "infeas", 3, label == best_infeas))
+                       else _fpm(label, "infeas", 3, best_infeas))
         reach_pct = f"{r['reached_rate']*100:.0f}\\%"
         reach_cell = (rf"\textbf{{{reach_pct}}}"
                       if abs(r["reached_rate"] - best_reach) < 1e-9 else reach_pct)
         lines += [
             f"{label}{TABLE_CITE.get(label, '')}",
-            f"& {_fpm(label, 'coll', 3, label == best_coll)}",
+            f"& {_fpm(label, 'coll', 3, best_coll)}",
             f"& {infeas_cell}",
             f"& {steps}",
-            f"& {_f(label, 'ctrl', '{:.1f}', label == best_ctrl)}",
+            f"& {_f(label, 'ctrl', '{:.1f}', best_ctrl)}",
             rf"& {reach_cell} \\",
         ]
     lines += [r"\hline", r"\end{tabular}"]
