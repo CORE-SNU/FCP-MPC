@@ -319,6 +319,8 @@ def write_latex_table(outcome_results, clean_ctrl):
 
     def _f(label, key, fmt, is_best):
         v = rows[label][key]
+        if isinstance(v, float) and np.isnan(v):
+            return "--"   # e.g. ECP has no post-warmup control steps at this density
         s = fmt.format(v)
         return rf"\textbf{{{s}}}" if is_best else s
 
