@@ -8,13 +8,13 @@ LOG=/home/sju5379/cp_scratch/run_dynamic_3d.log
 echo "=== START $(date -Is) ===" | tee -a "$LOG"
 
 echo "--- [1/2] make_3d_results.py (fair env; auto traj-seeds) ---" | tee -a "$LOG"
-conda run --no-capture-output -n cp python make_3d_results.py \
+conda run --no-capture-output -n cp python quadrotor/make_3d_results.py \
   --seeds 20 21 22 23 24 30 31 32 33 34 35 36 37 38 39 40 41 >> "$LOG" 2>&1
 RC1=$?
 echo "--- make_3d_results.py exit=$RC1 $(date -Is) ---" | tee -a "$LOG"
 
 echo "--- [2/2] run_sparse_3d.py (sparse table N_obs=50) ---" | tee -a "$LOG"
-conda run --no-capture-output -n cp python run_sparse_3d.py >> "$LOG" 2>&1
+conda run --no-capture-output -n cp python quadrotor/run_sparse_3d.py >> "$LOG" 2>&1
 RC2=$?
 echo "--- run_sparse_3d.py exit=$RC2 $(date -Is) ---" | tee -a "$LOG"
 

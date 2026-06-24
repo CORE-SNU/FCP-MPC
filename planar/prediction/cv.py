@@ -1,4 +1,11 @@
 from __future__ import annotations
+
+import os as _os, sys as _sys
+# Shared utils.py lives at the repo root (two levels up, alongside quadrotor/); put it
+# on sys.path so the absolute `from utils import` resolves from anywhere.
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))
+del _os, _sys
+
 from dataclasses import dataclass
 from typing import Optional, Tuple
 import numpy as np

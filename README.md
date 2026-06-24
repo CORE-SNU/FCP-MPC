@@ -48,31 +48,46 @@ Control (MPC, 2-D pedestrian avoidance)
 
 ## Repository structure
 
+The experiments are split into two parallel families — `planar/` (2-D pedestrian
+avoidance on ETH-UCY) and `quadrotor/` (3-D drone navigation) — over a shared core
+(`utils.py`, `cp/`, `controllers/`, `viz_traj.py`) that lives at the repo root so both
+families import the *same* conformal machinery and only the environment/planner differ.
+
 ```
+# --- shared core (used by both planar/ and quadrotor/) ---
+utils.py               # grid construction, distance fields, plotting helpers
+viz_traj.py            # trajectory-image helpers (save_traj_image_2d / _3d)
 cp/
   functional_cp.py     # FPCA + GMM offline calibration; CPStepParameters dataclass
 controllers/
   func_cp_mpc.py       # FunctionalCPMPC — 2-D controller (all 4 variants)
-  func_cp_mpc_hard.py  # Legacy grid-based controller (kept for reference)
-  acp_mpc.py           # Baseline: ACP-MPC (scalar, egocentric)
-  ecp_mpc.py           # Baseline: ECP-MPC (ellipsoidal CP)
-  cc.py                # Baseline: constant-cost navigation
-prediction/
-  cv.py                # Constant-velocity pedestrian prediction
-sims/
-  sim_func_cp.py       # Simulation loop for the 4 FCP variants
-  sim_acp_mpc.py       # Simulation loop for ACP-MPC baseline
-  sim_ecp_mpc.py       # Simulation loop for ECP-MPC baseline
-  sim_cc.py            # Simulation loop for CC baseline
-  sim_utils.py         # Unicycle dynamics, collision helpers
-predictions/           # Pre-computed prediction PKL files (one per dataset)
-metric/                # Output JSON files (auto-created)
-traj/                  # Output trajectory NPY files (auto-created)
-runner_2d.py           # Main entry point for 2-D experiments
-runner_3d.py           # Main entry point for 3-D (quadrotor) experiments
-run.sh                 # Full 2-D ablation sweep
-make_table_2d.py       # Aggregate metric/ → latex / csv tables
+  acp_mpc.py / ecp_mpc.py / cc.py                 # 2-D baselines
+  func_3d_mpc.py / acp_3d_mpc.py / ecp_mpc_3d.py / cp_3d_mpc.py   # 3-D controllers
+  utils.py             # path-sampling helpers shared by the 2-D and 3-D controllers
+
+# --- 2-D pedestrian avoidance on ETH-UCY ---
+planar/
+  runner_2d.py         # Main entry point for 2-D experiments
+  run.sh               # Full 2-D ablation sweep
+  make_table_2d.py     # Aggregate metric/ -> latex / csv tables
+  make_figs_2d.py      # Trajectory-overlay figure
+  preprocess.py        # ETH-UCY raw-data loader
+  prediction/cv.py     # Constant-velocity pedestrian prediction
+  sims/                # Simulation loops (sim_func_cp / sim_acp_mpc / sim_ecp_mpc / sim_cc) + helpers
+  predictions/         # Pre-computed prediction PKL files (one per dataset)
+  assets/homographies/ # ETH-UCY scene homographies
+  metric/  traj/       # Output JSON / NPY files (auto-created)
+
+# --- 3-D quadrotor navigation ---
+quadrotor/
+  runner_3d.py         # Main entry point for 3-D experiments
+  quad_env.py          # PyBullet quadrotor environment (+ repo-root sys.path bootstrap)
+  sim_{func,cp,ecp,acp}_3d.py, make_*_3d.py, run_*_3d.sh, ...
 ```
+
+Files in `planar/` and `quadrotor/` reach the shared root modules via a small
+`sys.path` bootstrap at the top of each entry point (it inserts the repo root onto
+`sys.path` so `import utils` / `from controllers... import ...` resolve from anywhere).
 
 ---
 
@@ -114,15 +129,15 @@ The 2-D experiments use the ETH/UCY pedestrian datasets (zara1, zara2, eth, univ
 ### Run a single experiment
 
 ```bash
-python runner_2d.py --dataset zara1 --controller fcp-hard-adaptive
+python planar/runner_2d.py --dataset zara1 --controller fcp-hard-adaptive
 ```
 
-Results are written to `metric/<dataset>_<controller>.json` and `traj/<dataset>_<controller>.npy`.
+Results are written to `planar/metric/<dataset>_<controller>.json` and `planar/traj/<dataset>_<controller>.npy`.
 
 ### Run the full ablation sweep
 
 ```bash
-bash run.sh
+bash planar/run.sh
 ```
 
 This evaluates all 7 controllers on all 4 datasets sequentially.
@@ -130,7 +145,7 @@ This evaluates all 7 controllers on all 4 datasets sequentially.
 ### Generate the results table
 
 ```bash
-python make_table_2d.py
+python planar/make_table_2d.py
 ```
 
 ---

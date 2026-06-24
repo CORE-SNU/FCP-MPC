@@ -19,7 +19,7 @@ for N_OBS in "${OBS_LIST[@]}"; do
   echo " Running N_OBS = ${N_OBS}"
   echo "========================================="
 
-  python3 runner_3d.py \
+  python3 quadrotor/runner_3d.py \
     --methods "${METHODS}" \
     --seed-from "${SEED_FROM}" \
     --seed-to "${SEED_TO}" \

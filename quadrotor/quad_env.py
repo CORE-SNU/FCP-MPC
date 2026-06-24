@@ -1,4 +1,12 @@
 from __future__ import annotations
+# This package lives in quadrotor/, but the shared controllers/ package and
+# utils.py live at the repo root (one level up). quad_env is imported first by
+# every 3D entry point (before any `controllers.*` import), so adding the repo
+# root to sys.path here makes those absolute imports resolve no matter where the
+# script is launched from.
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+del _os, _sys
 import numpy as np
 import pybullet as p
 from typing import Dict, Tuple, Optional, List

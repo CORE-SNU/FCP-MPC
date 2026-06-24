@@ -1,3 +1,9 @@
+import os as _os, sys as _sys
+# Shared controllers/ lives at the repo root (two levels up, alongside quadrotor/); put
+# it on sys.path so the absolute `from controllers...` import resolves.
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))
+del _os, _sys
+
 import os
 import numpy as np
 import matplotlib.pyplot as plt

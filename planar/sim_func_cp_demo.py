@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import os as _os, sys as _sys
+# Shared controllers/, cp/, utils.py and viz_traj.py live at the repo root (alongside
+# quadrotor/); put it on sys.path so those absolute imports resolve from anywhere.
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+del _os, _sys
+
 import os
 import pickle
 from typing import Dict, List, Optional, Tuple

@@ -15,7 +15,7 @@ TRAJ_IMG_DIR="traj_3d"
 TRAJ_IMG_MAX_SEEDS=3      # only dump trajectory PNGs for the first N seeds
 
 PY="python3"
-SCRIPT="runner_3d.py"
+SCRIPT="quadrotor/runner_3d.py"
 
 # parse args
 while [[ $# -gt 0 ]]; do
