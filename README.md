@@ -1,4 +1,4 @@
-# Planning Meets Functional Calibration: Function Conformal Prediction for Safe Motion Planning in Uncertain Environments
+# From Prediction Uncertainty to Conformalized Distance Fields for Safe Motion Planning
 
 This repository contains the experiment code for the paper. The method constructs a conformal upper envelope $U_i(x)$ over the distance-field prediction residual $S_{t+i|t}(x) = D_{t+i|t}(x) - D_{t+i}(x)$ and uses it to define a *certified lower bound* on the true distance field at every future step of an MPC rollout. The same conformal machinery is evaluated in two settings: 2-D pedestrian avoidance (ETH-UCY) and 3-D quadrotor navigation (PyBullet).
 
