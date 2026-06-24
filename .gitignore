@@ -19,14 +19,13 @@
 **/metric_3d
 **/metric_2d
 
-# Figures, bibliography and class files are ignored everywhere EXCEPT the
-# paper folder (T_RO2026), whose assets the LaTeX build needs.
+# Figures, bibliography and class files are regenerable / managed elsewhere.
 **/*.png
 **/*.bib
 **/*.cls
-!T_RO2026/*.png
-!T_RO2026/*.bib
-!T_RO2026/*.cls
+
+# The paper (T_RO2026) lives on Overleaf, not in this code repo.
+T_RO2026/
 
 # Scene homographies are small and needed to render the spatial-uncertainty
 # overlay; track them (videos stay ignored -- re-fetch via planar/assets/download_videos.sh).
