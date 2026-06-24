@@ -250,7 +250,8 @@ def shaded_sphere(ax, center, r, color, alpha, ls, n=64):
 # --------------------------------------------------------------------------- #
 def render(P: dict, sel: dict, out: str, elev: float, azim: float,
            usetex: bool, res: int, envelope_mode: str = "sphere",
-           margin_floor: float = 0.20, margin_cap: float = 0.8):
+           margin_floor: float = 0.20, margin_cap: float = 0.8,
+           grid: bool = True):
     safe_rad = float(P["safe_rad"])
     main_centers = np.vstack([c for c in (sel["gt"], sel["pred"]) if c.size]
                              + [sel["robot"][None]])
@@ -322,8 +323,13 @@ def render(P: dict, sel: dict, out: str, elev: float, azim: float,
     if usetex:
         plt.rcParams["text.usetex"] = True
 
-    fig = plt.figure(figsize=(6.4, 3.7), dpi=300)
+    fig = plt.figure(figsize=(7.0, 5.4), dpi=300)
     ax = fig.add_subplot(111, projection="3d")
+    if grid:
+        # fill the canvas: push the cube out toward the figure edges, leaving
+        # only a thin strip for tick/axis labels (tight-bbox cropping is
+        # unreliable for 3D label placement, so we size the axes explicitly)
+        ax.set_position([0.0, 0.08, 0.99, 0.90])
 
     if envelope_mode == "field":
         # exact (but ragged) conformal field: isosurfaces via marching cubes
@@ -365,7 +371,8 @@ def render(P: dict, sel: dict, out: str, elev: float, azim: float,
         ax.plot(path_arc[:, 0], path_arc[:, 1], path_arc[:, 2], c="#2ca02c", lw=2.8,
                 label="FCP-MPC path")
 
-    # cosmetics: light 3D "room" -- tinted panes for depth, but no grid/ticks/numbers
+    # cosmetics: light 3D "room" -- tinted panes for depth, with an optional
+    # reference grid (ticks + light gridlines + axis labels in metres)
     ax.set_xlim(lo[0], hi[0]); ax.set_ylim(lo[1], hi[1]); ax.set_zlim(lo[2], hi[2])
     try:
         ax.set_box_aspect((hi - lo))
@@ -373,13 +380,29 @@ def render(P: dict, sel: dict, out: str, elev: float, azim: float,
         pass
     ax.view_init(elev=elev, azim=azim)
     fig.patch.set_facecolor("white")
-    pane = (0.93, 0.95, 0.98, 1.0)   # very light blue-gray walls
-    for axc in (ax.xaxis, ax.yaxis, ax.zaxis):
-        axc.set_pane_color(pane)
-        axc.line.set_color((0.0, 0.0, 0.0, 0.0))
-        axc.set_ticks([])
-    ax.grid(False)
-    ax.set_xlabel(""); ax.set_ylabel(""); ax.set_zlabel("")
+    if grid:
+        # spatial reference: faint walls, light gridlines, small tick labels
+        pane = (0.97, 0.98, 1.0, 1.0)   # near-white walls so the grid reads
+        for axc in (ax.xaxis, ax.yaxis, ax.zaxis):
+            axc.set_pane_color(pane)
+            axc.line.set_color((0.45, 0.45, 0.45, 1.0))
+            axc.set_major_locator(plt.MaxNLocator(4))
+            axc._axinfo["grid"].update(color=(0.78, 0.80, 0.84, 1.0),
+                                       linewidth=0.6, linestyle="-")
+        ax.grid(True)
+        ax.tick_params(labelsize=6, pad=0.5, colors="0.30")
+        ax.set_xlabel("$x$ [m]", fontsize=7, labelpad=2)
+        ax.set_ylabel("$y$ [m]", fontsize=7, labelpad=2)
+        ax.set_zlabel("$z$ [m]", fontsize=7, labelpad=2)
+    else:
+        # original "clean" look: tinted walls, no grid/ticks/numbers
+        pane = (0.93, 0.95, 0.98, 1.0)   # very light blue-gray walls
+        for axc in (ax.xaxis, ax.yaxis, ax.zaxis):
+            axc.set_pane_color(pane)
+            axc.line.set_color((0.0, 0.0, 0.0, 0.0))
+            axc.set_ticks([])
+        ax.grid(False)
+        ax.set_xlabel(""); ax.set_ylabel(""); ax.set_zlabel("")
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     handles = [
@@ -393,13 +416,20 @@ def render(P: dict, sel: dict, out: str, elev: float, azim: float,
     ax.legend(handles=handles, loc="upper left", fontsize=7, framealpha=0.9,
               borderpad=0.3, handletextpad=0.5)
 
-    fig.tight_layout(pad=0.4)
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    fig.savefig(out, bbox_inches="tight", pad_inches=0.05)
-    print(f"[saved] {out}")
-    # also drop a preview copy next to the script for quick inspection
     prev = os.path.join(HERE, "fig_conformal_3d_preview.png")
-    fig.savefig(prev, bbox_inches="tight", pad_inches=0.05)
+    if grid:
+        # full canvas (no tight crop): the explicit axes margins above guarantee
+        # the x/y/z labels stay inside the figure, so nothing is clipped.
+        fig.savefig(out)
+        print(f"[saved] {out}")
+        fig.savefig(prev)
+    else:
+        fig.tight_layout(pad=0.4)
+        fig.savefig(out, bbox_inches="tight", pad_inches=0.05)
+        print(f"[saved] {out}")
+        # also drop a preview copy next to the script for quick inspection
+        fig.savefig(prev, bbox_inches="tight", pad_inches=0.05)
     print(f"[saved] {prev}")
 
 
@@ -424,6 +454,9 @@ def main():
     ap.add_argument("--envelope-mode", choices=["sphere", "field"], default="sphere")
     ap.add_argument("--margin", type=float, default=0.13,
                     help="conformal-envelope margin floor (radius = r_safe + margin)")
+    ap.add_argument("--no-grid", dest="grid", action="store_false",
+                    help="disable the reference grid (original clean look)")
+    ap.set_defaults(grid=True)
     ap.add_argument("--out", default=OUT)
     args = ap.parse_args()
 
@@ -440,7 +473,8 @@ def main():
     print(f"[select] frame={sel['frame']} iv={sel['iv']} "
           f"n_true={sel['gt'].shape[0]} n_pred={sel['pred'].shape[0]}")
     render(P, sel, args.out, args.elev, args.azim, args.usetex, args.res,
-           envelope_mode=args.envelope_mode, margin_floor=args.margin)
+           envelope_mode=args.envelope_mode, margin_floor=args.margin,
+           grid=args.grid)
 
 
 if __name__ == "__main__":
