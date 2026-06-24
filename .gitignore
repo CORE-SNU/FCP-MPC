@@ -24,8 +24,6 @@
 **/*.bib
 **/*.cls
 
-# The paper (T_RO2026) lives on Overleaf, not in this code repo.
-T_RO2026/
 
 # Scene homographies are small and needed to render the spatial-uncertainty
 # overlay; track them (videos stay ignored -- re-fetch via planar/assets/download_videos.sh).
